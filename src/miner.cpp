@@ -146,7 +146,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
         }
 
         uint32_t nTxNewTime = 0;
-        if (pwalletMain->CreateCoinStake(pblock->nBits, txCoinStake, nTxNewTime)) {
+        if (pwalletMain->CreateCoinStake(chainActive.Tip(), pblock->nBits, txCoinStake, nTxNewTime)) {
             pblock->nTime = nTxNewTime;
         } else {
             return nullptr;
@@ -788,10 +788,10 @@ void BitcoinMiner(std::shared_ptr<CReserveScript> coinbaseScript, bool fProofOfS
             //search our map of hashed blocks, see if bestblock has been hashed yet
             if (mapHashedBlocks.count(hashBestBlock)) {
                 if (mapStakeHashCounter.count(nHeight)) {
-                    LogPrint(BCLog::BLOCKCREATION, "%s: Tried %d stake hashed for block %d last=%d\n", __func__, mapStakeHashCounter.at(nHeight), nHeight+1, mapHashedBlocks.at(hashBestBlock));
+                    LogPrint(BCLog::BLOCKCREATION, "%s: Tried %d stake hashes for block %d last=%d\n", __func__, mapStakeHashCounter.at(nHeight), nHeight+1, mapHashedBlocks.at(hashBestBlock));
                 }
                 // wait half of the nHashDrift with max wait of 3 minutes
-                if (GetTime() + MAX_FUTURE_BLOCK_TIME - mapHashedBlocks[hashBestBlock] < 15) {
+                if (GetAdjustedTime() + 45 - mapHashedBlocks[hashBestBlock] < 5) {
                     MilliSleep(5000);
                     continue;
                 }

@@ -2712,14 +2712,14 @@ CAmount CWallet::GetMintableBalance(std::vector<COutput>& vMintableCoins) const
         CTxDestination address;
         if (coin.fSpendable) {
             //Veil: exclude coins held in the basecoin address
-            auto pOut = FindNonChangeParentOutput(*coin.tx->tx, coin.i);
+            auto pOut = coin.tx->tx->vpout[coin.i];
             if (!pOut->IsStandardOutput())
                 continue;
             if (!ExtractDestination(*pOut->GetPScriptPubKey(), address))
                 continue;
             if (mapAddressBook.count(address) && mapAddressBook.at(address).purpose == "basecoin")
                 continue;
-            balance += coin.tx->tx->vpout[coin.i]->GetValue();
+            balance += pOut->GetValue();
             vMintableCoins.emplace_back(std::move(coin));
         }
     }
@@ -3638,7 +3638,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransac
     return true;
 }
 
-bool CWallet::CreateCoinStake(unsigned int nBits, CMutableTransaction& txNew, unsigned int& nTxNewTime)
+bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits, CMutableTransaction& txNew, unsigned int& nTxNewTime)
 {
     // The following split & combine thresholds are important to security
     // Should not be adjusted if you don't understand the consequences
@@ -3663,7 +3663,7 @@ bool CWallet::CreateCoinStake(unsigned int nBits, CMutableTransaction& txNew, un
         return false;
 
     //Small sleep if too far back on timing
-    if (GetAdjustedTime() - chainActive.Tip()->GetBlockTime() < 1)
+    if (GetAdjustedTime() - pindexBest->GetBlockTime() < 1)
         MilliSleep(2500);
 
     CAmount nCredit = 0;
@@ -3675,35 +3675,33 @@ bool CWallet::CreateCoinStake(unsigned int nBits, CMutableTransaction& txNew, un
             return false;
 
         //make sure that enough time has elapsed between
-        CBlockIndex *pindex = stakeInput->GetIndexFrom();
-        if (!pindex || pindex->nHeight < 1) {
+        CBlockIndex *pindexFrom = stakeInput->GetIndexFrom();
+        if (!pindexFrom || pindexFrom->nHeight < 1) {
             LogPrintf("*** no pindexfrom\n");
             continue;
         }
 
-        // Read block header
-        CBlockHeader block = pindex->GetBlockHeader();
         uint256 hashProofOfStake;
         nTxNewTime = GetAdjustedTime();
-        auto nTimeMinBlock = pindex->pprev->GetBlockTime() - MAX_PAST_BLOCK_TIME;
+        auto nTimeMinBlock = pindexBest->GetBlockTime() - MAX_PAST_BLOCK_TIME;
         if (nTxNewTime < nTimeMinBlock)
             nTxNewTime = nTimeMinBlock + 1;
 
-        //Don't rehash the same timestamps
-        uint256 hashBlockPrev = pindex->pprev->GetBlockHash();
-        if (mapHashedBlocks.count(hashBlockPrev)) {
-            auto nTimeMin = mapHashedBlocks.at(hashBlockPrev);
-            if (nTxNewTime < nTimeMin)
-                nTxNewTime = nTimeMin + 1;
-        }
+//        //Don't rehash the same timestamps
+//        uint256 hashBlockPrev = pindexBest->GetBlockHash();
+//        if (mapHashedBlocks.count(hashBlockPrev)) {
+//            auto nTimeMin = mapHashedBlocks.at(hashBlockPrev) - 10; //last time hashed
+//            if (nTxNewTime < nTimeMin)
+//                nTxNewTime = nTimeMin + 1;
+//        }
 
         //iterates each utxo inside of CheckStakeKernelHash()
-        if (Stake(stakeInput.get(), nBits, block.GetBlockTime(), nTxNewTime, hashProofOfStake)) {
+        if (Stake(stakeInput.get(), nBits, pindexFrom->GetBlockTime(), nTxNewTime, pindexBest, hashProofOfStake)) {
             int nHeight = 0;
             {
                 LOCK(cs_main);
                 //Double check that this will pass time requirements
-                if (nTxNewTime <= chainActive.Tip()->GetMedianTimePast() || nTxNewTime < nTimeMinBlock) {
+                if (nTxNewTime <= pindexBest->GetMedianTimePast() || nTxNewTime < nTimeMinBlock) {
                     LogPrintf("CreateCoinStake() : kernel found, but it is too far in the past \n");
                     continue;
                 }
@@ -3798,7 +3796,7 @@ bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<CStakeInput> >& listInp
         }
     }
 
-    LogPrintf("%s: FOUND %d STAKABLE ZEROCOINS\n", __func__, listInputs.size());
+    LogPrint(BCLog::BLOCKCREATION, "%s: Found %d stakable zerocoins\n", __func__, listInputs.size());
 
     return true;
 }
@@ -4697,7 +4695,7 @@ void CWallet::AutoZeromint()
 {
     // After sync wait even more to reduce load when wallet was just started
     int64_t nWaitTime = GetAdjustedTime() - nAutoMintStartupTime;
-    if (nWaitTime < AUTOMINT_DELAY){
+    if (nWaitTime < 10){
         LogPrint(BCLog::SELECTCOINS, "CWallet::AutoZeromint(): time since sync-completion or last Automint (%ld sec) < default waiting time (%ld sec). Waiting again...\n", nWaitTime, AUTOMINT_DELAY);
         return;
     }
@@ -4709,9 +4707,9 @@ void CWallet::AutoZeromint()
     std::vector<COutput> vOutputs;
     CCoinControl coinControl;
     CAmount nBalance = GetMintableBalance(vOutputs); // won't consider locked outputs or basecoin address
-
+    LogPrintf("%s: Mintable balance = %s\n", __func__, FormatMoney(nBalance));
     if (nBalance <= libzerocoin::ZerocoinDenominationToAmount(libzerocoin::CoinDenomination::ZQ_TEN)){
-        LogPrint(BCLog::SELECTCOINS, "CWallet::AutoZeromint(): available balance (%ld) too small for minting zPIV\n", nBalance);
+        LogPrint(BCLog::SELECTCOINS, "CWallet::AutoZeromint(): available balance (%ld) too small for minting zerocoin\n", nBalance);
         return;
     }
 
@@ -4755,6 +4753,7 @@ void CWallet::AutoZeromint()
     } else {
         nMintAmount = 0;
     }
+    nMintAmount *= COIN;
 
     if (nMintAmount > 0){
 
@@ -4765,10 +4764,11 @@ void CWallet::AutoZeromint()
             if (nValueSelected > nMintAmount)
                 break;
         }
+        LogPrintf("%s: Select coin control = %s, mintamount = %s\n", __func__, FormatMoney(nValueSelected), FormatMoney(nMintAmount));
 
         CWalletTx wtx(NULL, NULL);
         std::vector<CDeterministicMint> vDMints;
-        string strError = GetMainWallet()->MintZerocoin(nMintAmount*COIN, wtx, vDMints, /*inputtype*/OUTPUT_STANDARD, &coinControl);
+        string strError = GetMainWallet()->MintZerocoin(nMintAmount, wtx, vDMints, /*inputtype*/OUTPUT_STANDARD, &coinControl);
 
         // Return if something went wrong during minting
         if (strError != ""){
@@ -5628,6 +5628,11 @@ bool CWallet::SpendZerocoin(CAmount nValue, int nSecurityLevel, CZerocoinSpendRe
         receipt.SetStatus("Failed to find Zerocoins in wallet.dat", nStatus);
         return false;
     }
+    std::list<CMintMeta> listMints;//(setMints.begin(), setMints.end());
+    for (auto meta : setMints) {
+        if (meta.denom == libzerocoin::CoinDenomination::ZQ_TEN)
+            listMints.push_back(meta);
+    }
 
     // If the input value is not an int, then we want the selection algorithm to round up to the next highest int
     double dValue = static_cast<double>(nValue) / static_cast<double>(COIN);
@@ -5636,7 +5641,9 @@ bool CWallet::SpendZerocoin(CAmount nValue, int nSecurityLevel, CZerocoinSpendRe
 
     // Select the z mints to use in this spend
     std::map<libzerocoin::CoinDenomination, CAmount> DenomMap = GetMyZerocoinDistribution().first;
-    std::list<CMintMeta> listMints(setMints.begin(), setMints.end());
+    //std::list<CMintMeta> listMints(setMints.begin(), setMints.end());
+
+
     CAmount nValueSelected;
     int nCoinsReturned, nNeededSpends;
     auto vMintsToFetch = SelectMintsFromList(nValueToSelect, nValueSelected, Params().Zerocoin_MaxSpendsPerTransaction(),

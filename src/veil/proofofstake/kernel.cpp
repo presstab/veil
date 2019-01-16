@@ -62,7 +62,7 @@ void WeightStake(CAmount& nValueIn, const libzerocoin::CoinDenomination denom)
     }
 }
 
-bool Stake(CStakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockFrom, unsigned int& nTimeTx, uint256& hashProofOfStake)
+bool Stake(CStakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockFrom, unsigned int& nTimeTx, const CBlockIndex* pindexBest, uint256& hashProofOfStake)
 {
     if (nTimeTx < nTimeBlockFrom)
         return error("Stake() : nTime violation");
@@ -82,21 +82,25 @@ bool Stake(CStakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockF
 
     bool fSuccess = false;
     unsigned int nTryTime = 0;
-    int nHeightStart = chainActive.Height();
-    int nHashDrift = GetTime() + MAX_FUTURE_BLOCK_TIME - 10 - nTimeTx;
-    if (nHashDrift < 0)
-        nHashDrift = 1;
+    int nHeightStart = pindexBest->nHeight;
+    int nHashDrift = 45;
+    int nMaxTime = (int)GetAdjustedTime() + MAX_FUTURE_BLOCK_TIME;
+    if (nTimeTx + nHashDrift > nMaxTime)
+        nHashDrift = nMaxTime - nTimeTx;
+
     CDataStream ssUniqueID = stakeInput->GetUniqueness();
     CAmount nValueIn = stakeInput->GetValue();
 
     //Adjust stake weights to larger denoms
     WeightStake(nValueIn, stakeInput->GetDenomination());
 
-    int nBestHeight = chainActive.Tip()->nHeight;
-    uint256 hashBestBlock = chainActive.Tip()->GetBlockHash();
+    int nBestHeight = pindexBest->nHeight;
+    uint256 hashBestBlock = pindexBest->GetBlockHash();
     if (!mapStakeHashCounter.count(nBestHeight)) {
         mapStakeHashCounter[nBestHeight] = 0;
     }
+
+    int nTimeBegin = nTimeTx;
     for (int i = 0; i < nHashDrift; i++) //iterate the hashing
     {
         //new block came in, move on
@@ -117,7 +121,7 @@ bool Stake(CStakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockF
     }
 
     mapHashedBlocks.clear();
-    mapHashedBlocks[hashBestBlock] = nTimeTx + nHashDrift; //store a time stamp of when we last hashed on this block
+    mapHashedBlocks[hashBestBlock] = nTimeBegin + nHashDrift; //store a time stamp of when we last hashed on this block
     return fSuccess;
 }
 
