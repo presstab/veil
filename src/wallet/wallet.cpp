@@ -3683,8 +3683,8 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
 
         uint256 hashProofOfStake;
         nTxNewTime = GetAdjustedTime();
-        auto nTimeMinBlock = pindexBest->GetBlockTime() - MAX_PAST_BLOCK_TIME;
-        if (nTxNewTime < nTimeMinBlock)
+        auto nTimeMinBlock = pindexBest->GetBlockTime();
+        //if (nTxNewTime < nTimeMinBlock)
             nTxNewTime = nTimeMinBlock + 1;
 
 //        //Don't rehash the same timestamps
@@ -3752,10 +3752,10 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
             }
             txNew.vin.emplace_back(in);
 
-            //Mark mints as spent
-            auto* z = (ZerocoinStake*)stakeInput.get();
-            if (!z->MarkSpent(this, txNew.GetHash()))
-                return error("%s: failed to mark mint as used\n", __func__);
+//            //Mark mints as spent
+//            auto* z = (ZerocoinStake*)stakeInput.get();
+//            if (!z->MarkSpent(this, txNew.GetHash()))
+//                return error("%s: failed to mark mint as used\n", __func__);
 
             fKernelFound = true;
             break;

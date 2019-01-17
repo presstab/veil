@@ -791,7 +791,7 @@ void BitcoinMiner(std::shared_ptr<CReserveScript> coinbaseScript, bool fProofOfS
                     LogPrint(BCLog::BLOCKCREATION, "%s: Tried %d stake hashes for block %d last=%d\n", __func__, mapStakeHashCounter.at(nHeight), nHeight+1, mapHashedBlocks.at(hashBestBlock));
                 }
                 // wait half of the nHashDrift with max wait of 3 minutes
-                if (GetAdjustedTime() + 45 - mapHashedBlocks[hashBestBlock] < 5) {
+                if (GetAdjustedTime() + MAX_FUTURE_BLOCK_TIME - mapHashedBlocks[hashBestBlock] < 25) {
                     MilliSleep(5000);
                     continue;
                 }
