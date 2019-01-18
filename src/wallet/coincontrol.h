@@ -92,6 +92,14 @@ public:
         vOutpoints.assign(setSelected.begin(), setSelected.end());
     }
 
+    CAmount GetValueSelected() const
+    {
+        CAmount nValue = 0;
+        for (const auto& p : m_inputData)
+            nValue += p.second.nValue;
+        return nValue;
+    }
+
     size_t NumSelected()
     {
         return setSelected.size();

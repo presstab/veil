@@ -153,10 +153,10 @@ void SendCoinsDialog::setModel(WalletModel *_model)
         updateDisplayUnit();
 
         // Coin Control
-//        connect(_model->getOptionsModel(), SIGNAL(displayUnitChanged(int)), this, SLOT(coinControlUpdateLabels()));
-//        connect(_model->getOptionsModel(), SIGNAL(coinControlFeaturesChanged(bool)), this, SLOT(coinControlFeatureChanged(bool)));
+        connect(_model->getOptionsModel(), SIGNAL(displayUnitChanged(int)), this, SLOT(coinControlUpdateLabels()));
+        connect(_model->getOptionsModel(), SIGNAL(coinControlFeaturesChanged(bool)), this, SLOT(coinControlFeatureChanged(bool)));
 //        ui->frameCoinControl->setVisible(_model->getOptionsModel()->getCoinControlFeatures());
-//        coinControlUpdateLabels();
+        coinControlUpdateLabels();
 
         // fee section
         //connect(ui->optInRBF, SIGNAL(stateChanged(int)), this, SLOT(updateSmartFeeLabel()));
@@ -244,8 +244,10 @@ void SendCoinsDialog::on_sendButton_clicked()
 
     // Always use a CCoinControl instance, use the CoinControlDialog instance if CoinControl has been enabled
     CCoinControl ctrl;
-    if (model->getOptionsModel()->getCoinControlFeatures())
+    if (model->getOptionsModel()->getCoinControlFeatures()) {
+        std::cout << "sedncoins 248\n";
         ctrl = *CoinControlDialog::coinControl();
+    }
 
     updateCoinControlState(ctrl);
 
@@ -615,7 +617,9 @@ void SendCoinsDialog::useAvailableBalance(SendCoinsEntry* entry)
 {
     // Get CCoinControl instance if CoinControl is enabled or create a new one.
     CCoinControl coin_control;
+    std::cout << "619\n";
     if (model->getOptionsModel()->getCoinControlFeatures()) {
+        std::cout << "622\n";
         coin_control = *CoinControlDialog::coinControl();
     }
 
@@ -872,7 +876,7 @@ void SendCoinsDialog::coinControlUpdateLabels()
     if (CoinControlDialog::coinControl()->HasSelected())
     {
         // actual coin control calculation
-//        CoinControlDialog::updateLabels(model, this);
+        CoinControlDialog::updateLabels(model, this);
 
         // show coin control stats
         //ui->labelCoinControlAutomaticallySelected->hide();

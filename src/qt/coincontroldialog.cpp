@@ -377,8 +377,28 @@ void CoinControlDialog::viewItemChanged(QTreeWidgetItem* item, int column)
             coinControl()->UnSelect(outpt);
         else if (item->isDisabled()) // locked (this happens if "check all" through parent node)
             item->setCheckState(COLUMN_CHECKBOX, Qt::Unchecked);
-        else
+        else {
+            int nTypeExisting = -1;
+            if (coinControl()->HasSelected()) {
+                // If coins are already selected make sure it matches other input types
+                nTypeExisting = coinControl()->nCoinType;
+            }
+
+            int nTypeSelected = -1;
+            auto strSelection = item->text(COLUMN_COINTYPE);
+            if (strSelection.contains("(RingCT)"))
+                nTypeSelected = OUTPUT_RINGCT;
+            else if (strSelection.contains("(CT)"))
+                nTypeSelected = OUTPUT_CT;
+            else
+                nTypeSelected = OUTPUT_STANDARD;
+
+            //Clear any other selections if not the same
+            if (nTypeExisting != -1 && nTypeExisting != nTypeSelected)
+                coinControl()->UnSelectAll();
+            coinControl()->nCoinType = nTypeSelected;
             coinControl()->Select(outpt);
+        }
 
         // selection changed -> update labels
         if (ui->treeWidget->isEnabled()) // do not update on every click for (un)select all
@@ -764,6 +784,10 @@ void CoinControlDialog::updateView()
 
             //Also need to filter out zerocoinmints
             if (pWalletTx->tx->vpout[i]->IsZerocoinMint())
+                continue;
+
+            //Don't display zero confirmed outputs
+            if (pWalletTx->GetDepthInMainChain() < 1)
                 continue;
 
             CCoinControlWidgetItem *itemOutput;
