@@ -561,6 +561,7 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
             vpCommitsIn.push_back(&plainInCommitment);
         }
 
+
         if (nPlainValueOut > 0) {
             if (!secp256k1_pedersen_commit(secp256k1_ctx_blind, &plainOutCommitment, blindPlain, (uint64_t) nPlainValueOut, secp256k1_generator_h))
                 return state.Invalid(false, REJECT_INVALID, "commit-failed");
@@ -573,12 +574,15 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
             if ((pc = txout->GetPCommitment()))
                 vpCommitsOut.push_back(pc);
         }
-
+        LogPrintf("in=%s commitsin=%d plainout=%s commitsout=%d\n", FormatMoney(nValueIn), vpCommitsIn.size(), FormatMoney(nPlainValueOut), vpCommitsOut.size());
         int rv = secp256k1_pedersen_verify_tally(secp256k1_ctx_blind, vpCommitsIn.data(), vpCommitsIn.size(),
                 vpCommitsOut.data(), vpCommitsOut.size());
 
-        if (rv != 1)
+        if (rv != 1) {
+            LogPrintf("%s:%s code=%d\n", __func__, __LINE__, rv);
             return state.DoS(100, false, REJECT_INVALID, "bad-commitment-sum");
+        }
+
     }
 
     int nZerocoinMints = 0;

@@ -1932,7 +1932,8 @@ int AnonWallet::AddStandardInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx,
                 return wserrorN(1, sError, __func__, "secp256k1_pedersen_commit failed for plain in.");
             }
 
-            nValueOutPlain += nValueOutZerocoin;
+            nValueOutPlain += nValueOutZerocoin + nFeeRet;
+            LogPrintf("%s valoutplain=%s valuein=%s\n", __LINE__, FormatMoney(nValueOutPlain), FormatMoney(nValueIn));
             if (nValueOutPlain > 0) {
                 vpBlinds.push_back(&vBlindPlain[0]);
 
@@ -2008,6 +2009,7 @@ int AnonWallet::AddStandardInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx,
             nFeeNeeded = GetMinimumFee(*pwalletParent, nBytes, *coinControl, ::mempool, ::feeEstimator, &feeCalc);
             if (nFeeZerocoin)
                 nFeeNeeded = std::max(nFeeNeeded, nFeeZerocoin);
+            LogPrintf("FEE NEEDED %s = %s\n", __LINE__, FormatMoney(nFeeNeeded));
 
             // If we made it here and we aren't even able to meet the relay fee on the next pass, give up
             // because we must be at the maximum allowed fee.
@@ -2054,6 +2056,7 @@ int AnonWallet::AddStandardInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx,
                         r.nAmount = c->GetValue();
 
                         nFeeRet -= extraFeePaid;
+                        LogPrintf("FEE NEEDED %s = %s\n", __LINE__, FormatMoney(nFeeRet));
                     }
 
                     break; // Done, enough fee included.
@@ -2102,6 +2105,7 @@ int AnonWallet::AddStandardInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx,
         if (!fOnlyStandardOutputs) {
             std::vector<uint8_t> &vData = ((CTxOutData*)txNew.vpout[0].get())->vData;
             vData.resize(1);
+            LogPrintf("FEE NEEDED %s = %s\n", __LINE__, FormatMoney(nFeeRet));
             if (0 != PutVarInt(vData, nFeeRet)) {
                 return werrorN(1, "%s: PutVarInt %d failed\n", __func__, nFeeRet);
             }
@@ -2239,6 +2243,23 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
     //If output is going out as zerocoin, then it is being double counted and needs to be subtracted
     nValueOutBlind -= nValueOutZerocoin;
 
+    //Give 1 sat blind out
+//    if (!fHasCTOut) {
+//        LogPrintf("%s:%s\n", __func__, __LINE__);
+//        CTempRecipient r;
+//        r.nType = OUTPUT_CT;
+//        r.fLastBlindDummy = true;
+//        CStealthAddress stealthAddress;
+//        if (!NewStealthKey(stealthAddress, 0, nullptr)) {
+//            error("%s: failed to generate stealth address to use for change: %s", __func__, sError);
+//            return 1;
+//        }
+//        r.address = stealthAddress;
+//        r.nAmount = 0;
+//        r.isMine = true;
+//        vecSend.emplace_back(r);
+//    }
+
     if (!ExpandTempRecipients(vecSend, sError))
         return 1; // sError is set
 
@@ -2248,7 +2269,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
     CMutableTransaction txNew;
 
     // Discourage fee sniping. See CWallet::CreateTransaction
-    txNew.nLockTime = chainActive.Height();
+    txNew.nLockTime = chainActive.Height() - 1;
 
     // 1/10 chance of random time further back to increase privacy
     if (GetRandInt(10) == 0) {
@@ -2431,6 +2452,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
 
             nFeeNeeded = GetMinimumFee(*pwalletParent, nBytes, *coinControl, ::mempool, ::feeEstimator, &feeCalc);
             nFeeNeeded = std::max(nFeeNeeded, nFeeZerocoin);
+            LogPrintf("%s:%s feeneeded=%s nfeeret=%s\n", __func__, __LINE__, FormatMoney(nFeeNeeded), FormatMoney(nFeeRet));
 
             // If we made it here and we aren't even able to meet the relay fee on the next pass, give up
             // because we must be at the maximum allowed fee.
@@ -2451,10 +2473,12 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
 
                     r.nAmount += extraFeePaid;
                     nFeeRet -= extraFeePaid;
+                    LogPrintf("%s:%s feeneeded=%s nfeeret=%s\n", __func__, __LINE__, FormatMoney(nFeeNeeded), FormatMoney(nFeeRet));
                 }
 
                 if (nSubtractFeeFromAmount) {
                     if (nValueOutPlain + nFeeRet == nValueIn) {
+                        LogPrintf("%s:%s feeneeded=%s nfeeret=%s\n", __func__, __LINE__, FormatMoney(nFeeNeeded), FormatMoney(nFeeRet));
                         // blinded input value == plain output value
                         // blinding factor will be 0 for change
                         // an observer could see sum blinded inputs must match plain outputs, avoid by forcing a 1sat change output
@@ -2498,7 +2522,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
                 auto &r = vecSend[nChangePosInOut];
 
                 CAmount additionalFeeNeeded = nFeeNeeded - nFeeRet;
-
+                LogPrintf("%s:%s feeneeded=%s nfeeret=%s\n", __func__, __LINE__, FormatMoney(nFeeNeeded), FormatMoney(nFeeRet));
                 if (r.nAmount >= MIN_FINAL_CHANGE + additionalFeeNeeded) {
                     r.nAmount -= additionalFeeNeeded;
                     nFeeRet += additionalFeeNeeded;
@@ -2514,6 +2538,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
 
             // Include more fee and try again.
             nFeeRet = nFeeNeeded;
+            LogPrintf("%s:%s feeneeded=%s nfeeret=%s\n", __func__, __LINE__, FormatMoney(nFeeNeeded), FormatMoney(nFeeRet));
             continue;
         }
         coinControl->nChangePos = nChangePosInOut;
@@ -2563,6 +2588,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
         memset(&vBlindPlain[0], 0, 32);
 
         //secp256k1_pedersen_commitment plainCommitment;
+        LogPrintf("%s:%s feeneeded=%s nfeeret=%s valueoutpplain=%s\n", __func__, __LINE__, FormatMoney(nFeeNeeded), FormatMoney(nFeeRet), FormatMoney(nValueOutPlain));
         if (nValueOutPlain > 0) {
             vpBlinds.push_back(&vBlindPlain[0]);
             //if (!secp256k1_pedersen_commit(secp256k1_ctx_blind, &plainCommitment, &vBlindPlain[0], (uint64_t) nValueOutPlain, secp256k1_generator_h))
@@ -2578,7 +2604,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
                 if ((int)i != nChangePosInOut) {
                     vpBlinds.push_back(&r.vBlind[0]);
                 }
-
+                LogPrintf("%s:%s\n", __func__, __LINE__);
                 nLastBlinded = i;
             }
         }
@@ -2590,6 +2616,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
         }
 
         if (nLastBlinded != -1) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             auto &r = vecSend[nLastBlinded];
             if (r.nType != OUTPUT_CT && r.nType != OUTPUT_RINGCT) {
                 return wserrorN(1, sError, __func__, "nLastBlinded not blind.");
@@ -5130,27 +5157,27 @@ void AnonWallet::AvailableBlindedCoins(std::vector<COutputR>& vCoins, bool fOnly
     CCoinsViewMemPool viewMemPool(pcoinsTip.get(), mempool);
     view.SetBackend(viewMemPool);
 
-    if (coinControl && coinControl->HasSelected()) {
-        // Add specified coins which may not be in the chain
-        for (MapRecords_t::const_iterator it = mapTempRecords.begin(); it !=  mapTempRecords.end(); ++it) {
-            const uint256 &txid = it->first;
-            const CTransactionRecord &rtx = it->second;
-            for (const auto &r : rtx.vout) {
-                if (r.IsSpent() || !view.HaveCoin(COutPoint(txid, r.n)))
-                    continue;
-
-                if (coinControl->IsSelected(COutPoint(txid, r.n))) {
-                    int nDepth = 0;
-                    bool fSpendable = true;
-                    bool fSolvable = true;
-                    bool safeTx = true;
-                    bool fMature = false;
-                    bool fNeedHardwareKey = false;
-                    vCoins.emplace_back(txid, it, r.n, nDepth, fSpendable, fSolvable, safeTx, fMature, fNeedHardwareKey);
-                }
-            }
-        }
-    }
+//    if (coinControl && coinControl->HasSelected()) {
+//        // Add specified coins which may not be in the chain
+//        for (MapRecords_t::const_iterator it = mapTempRecords.begin(); it !=  mapTempRecords.end(); ++it) {
+//            const uint256 &txid = it->first;
+//            const CTransactionRecord &rtx = it->second;
+//            for (const auto &r : rtx.vout) {
+//                if (r.IsSpent() || !view.HaveCoin(COutPoint(txid, r.n)))
+//                    continue;
+//
+//                if (coinControl->IsSelected(COutPoint(txid, r.n))) {
+//                    int nDepth = 0;
+//                    bool fSpendable = true;
+//                    bool fSolvable = true;
+//                    bool safeTx = true;
+//                    bool fMature = false;
+//                    bool fNeedHardwareKey = false;
+//                    vCoins.emplace_back(txid, it, r.n, nDepth, fSpendable, fSolvable, safeTx, fMature, fNeedHardwareKey);
+//                }
+//            }
+//        }
+//    }
 
     CAmount nTotal = 0;
 
@@ -5188,6 +5215,10 @@ void AnonWallet::AvailableBlindedCoins(std::vector<COutputR>& vCoins, bool fOnly
         }
 
         for (const auto &r : rtx.vout) {
+            if (coinControl && coinControl->HasSelected()) {
+                if (!coinControl->IsSelected(COutPoint(txid, r.n)))
+                    continue;
+            }
 
             if (r.nType != OUTPUT_CT)
                 continue;

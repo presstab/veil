@@ -72,19 +72,24 @@ public:
         return (setSelected.count(output) > 0);
     }
 
-    void Select(const COutPoint& output)
+    void Select(const COutPoint& output, CAmount nValue)
     {
         setSelected.insert(output);
+        CInputData inputData;
+        inputData.nValue = nValue;
+        m_inputData.emplace(output, inputData);
     }
 
     void UnSelect(const COutPoint& output)
     {
         setSelected.erase(output);
+        m_inputData.erase(output);
     }
 
     void UnSelectAll()
     {
         setSelected.clear();
+        m_inputData.clear();
     }
 
     void ListSelected(std::vector<COutPoint>& vOutpoints) const

@@ -214,10 +214,12 @@ CCoinControl& coinControl, OutputTypes inputType)
     CAmount nBalance = 0;
     OutputTypes outputType;
     if (coinControl.HasSelected()) {
-        std:: cout << "217\n";
+        nBalance = coinControl.GetValueSelected();
+        std:: cout << "217 : selected=" << nBalance << " total=" << total <<"\n";
         inputType = static_cast<OutputTypes>(coinControl.nCoinType);
-        if (total > coinControl.GetValueSelected())
+        if (total > nBalance) {
             return AmountExceedsBalance;
+        }
     }
 
 
@@ -239,15 +241,20 @@ CCoinControl& coinControl, OutputTypes inputType)
         } else {
             /** If not enough zerocoin balance, spend ringct **/
             int nNetworkAnon = 0;
-            if (!coinControl.HasSelected() || (coinControl.HasSelected() && inputType == OUTPUT_RINGCT)) {
+            if (!coinControl.HasSelected() || (coinControl.HasSelected() && (inputType == OUTPUT_RINGCT || inputType == OUTPUT_CT))) {
                 spendType = WalletModelSpendType::RINGCTSPEND;
                 outputType = OUTPUT_RINGCT;
-                inputType = OUTPUT_RINGCT;
+
+                //If input type was not selected with coincontrol, then set to ringct by default
+                if (inputType != OUTPUT_RINGCT && inputType != OUTPUT_CT)
+                    inputType = OUTPUT_RINGCT;
                 {
                     LOCK(cs_main);
                     nNetworkAnon = chainActive.Tip()->nAnonOutputs;
                 }
-                nBalance = m_wallet->getAvailableRingCTBalance(coinControl);
+
+                if (!nBalance)
+                    nBalance = m_wallet->getAvailableRingCTBalance(coinControl);
             }
 
             if (!coinControl.HasSelected() && (total > nBalance || (nNetworkAnon < 50))) {
