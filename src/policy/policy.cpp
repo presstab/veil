@@ -268,11 +268,11 @@ bool IsWitnessStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
         {
             size_t sizeWitnessStack = tx.vin[i].scriptWitness.stack.size();
             if (sizeWitnessStack > 3)
-                return false;
+                return error("%s: sizeWitnessStack too big. size=%d max=%d", __func__, sizeWitnessStack, 3);
             for (unsigned int j = 0; j < sizeWitnessStack; j++)
             {
                 if (tx.vin[i].scriptWitness.stack[j].size() > 4096) // TODO: max limits?
-                    return false;
+                    return error("%s: witness stack too big. size=%d max=%d", __func__, tx.vin[i].scriptWitness.stack[j].size(), 4096);
             };
             continue;
         };
