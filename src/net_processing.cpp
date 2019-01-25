@@ -1533,7 +1533,8 @@ void ProcessStaging()
         if (vProofs.size() > 1) {
             if (nHighestBlockCheck > nHeightLastCheckpoint) {
                 LogPrintf("%s: Batch verifying %d zeroknowledge proofs\n", __func__, vProofs.size());
-                if (!libzerocoin::SerialNumberSoKProof::BatchVerify(vProofs)) {
+
+                if (!ThreadedBatchVerify(&vProofs)) {
                     fVerificationSuccess = false;
                 }
             }
