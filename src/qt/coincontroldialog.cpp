@@ -535,15 +535,17 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
         if (nDepth < 1)
             continue;
 
-        for(unsigned int i = 1; i < txRecord.vout.size(); i++) {
+        for(unsigned int i = 0; i < txRecord.vout.size(); i++) {
             COutputRecord outputRecord = txRecord.vout[i];
+            if (outputRecord.nType == OUTPUT_DATA)
+                continue;
 
             // unselect already spent, very unlikely scenario, this could happen
             // when selected are spent elsewhere, like rpc or another computer
-            if (outputRecord.IsSpent()) {
-                coinControl()->UnSelect(COutPoint(txid, outputRecord.n));
-                continue;
-            }
+//            if (outputRecord.IsSpent()) {
+//                coinControl()->UnSelect(COutPoint(txid, outputRecord.n));
+//                continue;
+//            }
 
             // Amount
             if (coinControl()->IsSelected(COutPoint(txid, outputRecord.n)))
@@ -604,7 +606,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
     int nDisplayUnit = BitcoinUnits::VEIL;
     if (model && model->getOptionsModel())
         nDisplayUnit = model->getOptionsModel()->getDisplayUnit();
-/*
+
     QLabel *l1 = dialog->findChild<QLabel *>("labelCoinControlQuantity");
     QLabel *l2 = dialog->findChild<QLabel *>("labelCoinControlAmount");
     QLabel *l3 = dialog->findChild<QLabel *>("labelCoinControlFee");
@@ -612,7 +614,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
     QLabel *l5 = dialog->findChild<QLabel *>("labelCoinControlBytes");
     QLabel *l7 = dialog->findChild<QLabel *>("labelCoinControlLowOutput");
     QLabel *l8 = dialog->findChild<QLabel *>("labelCoinControlChange");
-*/
+
     // enable/disable "dust" and "change"
     /*
     dialog->findChild<QLabel *>("labelCoinControlLowOutputText")->setEnabled(nPayAmount > 0);
@@ -621,24 +623,24 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
     dialog->findChild<QLabel *>("labelCoinControlChange")       ->setEnabled(nPayAmount > 0);
 */
     // stats
-/*    l1->setText(QString::number(nQuantity));                                 // Quantity
-    l2->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nAmount));        // Amount
-    l3->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nPayFee));        // Fee
-    l4->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nAfterFee));      // After Fee
-    l5->setText(((nBytes > 0) ? ASYMP_UTF8 : "") + QString::number(nBytes));        // Bytes
-    l7->setText(fDust ? tr("yes") : tr("no"));                               // Dust
-    l8->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nChange));        // Change
-    if (nPayFee > 0)
-    {
-        l3->setText(ASYMP_UTF8 + l3->text());
-        l4->setText(ASYMP_UTF8 + l4->text());
-        if (nChange > 0 && !CoinControlDialog::fSubtractFeeFromAmount)
-            l8->setText(ASYMP_UTF8 + l8->text());
+    if (l1) {
+        l1->setText(QString::number(nQuantity));                                 // Quantity
+        l2->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nAmount));        // Amount
+        l3->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nPayFee));        // Fee
+        l4->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nAfterFee));      // After Fee
+        l5->setText(((nBytes > 0) ? ASYMP_UTF8 : "") + QString::number(nBytes));        // Bytes
+        l7->setText(fDust ? tr("yes") : tr("no"));                               // Dust
+        l8->setText(BitcoinUnits::formatWithUnit(nDisplayUnit, nChange));        // Change
+        if (nPayFee > 0) {
+            l3->setText(ASYMP_UTF8 + l3->text());
+            l4->setText(ASYMP_UTF8 + l4->text());
+            if (nChange > 0 && !CoinControlDialog::fSubtractFeeFromAmount)
+                l8->setText(ASYMP_UTF8 + l8->text());
+        }
+
+        // turn label red when dust
+        l7->setStyleSheet((fDust) ? "color:red;" : "");
     }
-
-    // turn label red when dust
-    l7->setStyleSheet((fDust) ? "color:red;" : "");
-
 
     // tool tips
     QString toolTipDust = tr("This label turns red if any recipient receives an amount smaller than the current dust threshold.");
@@ -647,7 +649,7 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
     double dFeeVary = (nBytes != 0) ? (double)nPayFee / nBytes : 0;
 
     QString toolTip4 = tr("Can vary +/- %1 satoshi(s) per input.").arg(dFeeVary);
-
+/*
     l3->setToolTip(toolTip4);
     l4->setToolTip(toolTip4);
     l7->setToolTip(toolTipDust);
