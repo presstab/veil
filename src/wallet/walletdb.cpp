@@ -227,6 +227,7 @@ ReadKeyValue(CWallet* pwallet, CDataStream& ssKey, CDataStream& ssValue,
             if (wtx.nOrderPos == -1)
                 wss.fAnyUnordered = true;
 
+            LogPrintf("%s:%d\n", __func__, __LINE__);
             pwallet->LoadToWallet(wtx);
         }
         else if (strType == "watchs")

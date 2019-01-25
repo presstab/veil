@@ -94,9 +94,10 @@ void BaseIndex::ThreadSync()
                 WriteBestBlock(pindex);
                 return;
             }
-
+            LogPrintf("%s:%d\n", __func__, __LINE__);
             {
                 LOCK(cs_main);
+                LogPrintf("%s:%d\n", __func__, __LINE__);
                 const CBlockIndex* pindex_next = NextSyncBlock(pindex);
                 if (!pindex_next) {
                     WriteBestBlock(pindex);
@@ -106,13 +107,14 @@ void BaseIndex::ThreadSync()
                 }
                 pindex = pindex_next;
             }
+            LogPrintf("%s:%d\n", __func__, __LINE__);
 
             int64_t current_time = GetTime();
-            if (last_log_time + SYNC_LOG_INTERVAL < current_time) {
+            //if (last_log_time + SYNC_LOG_INTERVAL < current_time) {
                 LogPrintf("Syncing %s with block chain from height %d\n",
                           GetName(), pindex->nHeight);
                 last_log_time = current_time;
-            }
+            //}
 
             if (last_locator_write_time + SYNC_LOCATOR_WRITE_INTERVAL < current_time) {
                 WriteBestBlock(pindex);
@@ -130,6 +132,7 @@ void BaseIndex::ThreadSync()
                            __func__, pindex->GetBlockHash().ToString());
                 return;
             }
+            LogPrintf("%s:%d\n", __func__, __LINE__);
         }
     }
 

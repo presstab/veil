@@ -511,10 +511,30 @@ void CoinControlDialog::updateLabels(WalletModel *model, QDialog* dialog)
     for (const auto& recordPair : mapTxRecords) {
         uint256 txid = recordPair.first;
         CTransactionRecord txRecord = recordPair.second;
-        const CWalletTx* pWalletTx = model->wallet().getWalletPointer()->GetWalletTx(txid);
-        if (!pWalletTx)
+        CTransactionRef txRef;
+
+        const CWalletTx* pwtx = model->wallet().getWalletPointer()->GetWalletTx(txid);
+        int nDepth = 0;
+        if (pwtx) {
+            txRef = pwtx->tx;
+            nDepth = pwtx->GetDepthInMainChain();
+        } else {
+            uint256 hashBlock;
+            if (!GetTransaction(txid, txRef, Params().GetConsensus(), hashBlock, true))
+                continue;
+            auto it = mapBlockIndex.find(hashBlock);
+            if (it == mapBlockIndex.end())
+                continue;
+
+            if (!chainActive.Contains(it->second))
+                continue;
+
+            nDepth = chainActive.Height() - it->second->nHeight + 1;
+        }
+
+        if (nDepth < 0)
             continue;
-        if (pWalletTx->GetDepthInMainChain() < 0) continue;
+
         for(unsigned int i = 1; i < txRecord.vout.size(); i++) {
             COutputRecord outputRecord = txRecord.vout[i];
 
@@ -777,22 +797,63 @@ void CoinControlDialog::updateView()
     for (const auto& recordPair : mapTxRecords) {
         uint256 txid = recordPair.first;
         CTransactionRecord txRecord = recordPair.second;
-        const CWalletTx* pWalletTx = model->wallet().getWalletPointer()->GetWalletTx(txid);
-        if (!pWalletTx)
-            continue;
-        for(unsigned int i = 1; i < txRecord.vout.size(); i++) {
+        const CWalletTx* pwtx = model->wallet().getWalletPointer()->GetWalletTx(txid);
+        CTransactionRef txRef;
+        int nDepth = 0;
+        unsigned int nTimeTx = 0;
+        if (pwtx) {
+            txRef = pwtx->tx;
+            nDepth = pwtx->GetDepthInMainChain();
+            nTimeTx = pwtx->GetTxTime();
+        } else {
+            uint256 hashBlock;
+            if (!GetTransaction(txid, txRef, Params().GetConsensus(), hashBlock, true)) {
+                LogPrintf("%s: %s no tx\n", __func__, txid.GetHex());
+                continue;
+            }
+
+            auto it = mapBlockIndex.find(hashBlock);
+            if (it == mapBlockIndex.end()) {
+                LogPrintf("%s: %s no hashblock %s\n", __func__, txid.GetHex(), hashBlock.GetHex());
+                continue;
+            }
+
+            if (!chainActive.Contains(it->second)) {
+                LogPrintf("%s: %s not in chainactive\n", __func__, txid.GetHex());
+                continue;
+            }
+
+            nDepth = chainActive.Height() - it->second->nHeight + 1;
+            nTimeTx = it->second->GetBlockTime();
+        }
+
+        if (txRecord.vout.empty())
+            LogPrintf("%s: %s empty vout\n", __func__, txid.GetHex());
+
+        for(unsigned int i = 0; i < txRecord.vout.size(); i++) {
             int nChildren = 0;
             CAmount nSum = 0;
             const auto& out = txRecord.vout[i];
-            if (out.IsSpent() || !(out.nFlags & ORF_OWNED) || out.IsBasecoin())
+            if (out.nType == OUTPUT_DATA)
                 continue;
+            if (out.IsSpent(false) || !(out.nFlags & ORF_OWNED) || out.IsBasecoin()) {
+                LogPrintf("%s: %s:%d isbasecoin %d spent=%d owned=%d \n", __func__, txid.GetHex(), i, out.IsBasecoin(), out.IsSpent(false), (out.nFlags & ORF_OWNED));
+                continue;
+            }
 
             //Also need to filter out zerocoinmints
-            if (pWalletTx->tx->vpout[i]->IsZerocoinMint())
+            if (txRef->vpout[i]->IsZerocoinMint()) {
+                LogPrintf("%s: %s:%d zcmint\n", __func__, txid.GetHex(), i);
                 continue;
+            }
 
             //Don't display zero confirmed outputs
-            if (pWalletTx->GetDepthInMainChain() < 1)
+            if (nDepth < 1) {
+                LogPrintf("%s: %s:%d depth %d\n", __func__, txid.GetHex(), i, nDepth);
+                continue;
+            }
+
+            if (out.GetAmount() == 0)
                 continue;
 
             CCoinControlWidgetItem *itemOutput;
@@ -801,11 +862,19 @@ void CoinControlDialog::updateView()
             //Get Address
             CKeyID stealthID;
             CStealthAddress sxAddress;
+
+            CScript scriptPubKey;
+            if (!out.scriptPubKey.empty())
+                scriptPubKey = out.scriptPubKey;
+
             if (!out.GetStealthID(stealthID) && out.nType == OUTPUT_CT) {
                 // Manually parse the stealth destination from the transaction.
-                CTxOutCT* txout = (CTxOutCT*)pWalletTx->tx->vpout[i].get();
+                txRef->vpout[i]->GetScriptPubKey(scriptPubKey);
+            }
+
+            if (stealthID == CKeyID() && !scriptPubKey.empty()) {
                 CTxDestination dest;
-                if (ExtractDestination(txout->scriptPubKey, dest)) {
+                if (ExtractDestination(scriptPubKey, dest)) {
                     if (dest.type() == typeid(CKeyID)) {
                         CKeyID idStealthDestination = boost::get<CKeyID>(dest);
                         if (!pAnonWallet->GetStealthLinked(idStealthDestination, sxAddress))
@@ -813,7 +882,7 @@ void CoinControlDialog::updateView()
                     }
                 }
             } else if (!pAnonWallet->GetStealthAddress(stealthID, sxAddress)) {
-                LogPrintf("%s: Failed to get Stealth address from StealthID", __func__);
+                LogPrintf("%s: *************************************************** Failed to get Stealth address from StealthID", __func__);
                 continue;
             }
 
@@ -837,8 +906,7 @@ void CoinControlDialog::updateView()
                 nSum = std::get<1>(mapEntry);
                 nChildren = std::get<2>(mapEntry);
                 itemOutput = new CCoinControlWidgetItem(itemWalletAddress);
-            }
-            else {
+            } else {
                 itemOutput = new CCoinControlWidgetItem(ui->treeWidget);
                 itemOutput->setText(COLUMN_ADDRESS, QString::fromStdString(sxAddress.ToString(/*fBech32*/true)));
             }
@@ -859,12 +927,12 @@ void CoinControlDialog::updateView()
             nChildren++;
 
             // date
-            itemOutput->setText(COLUMN_DATE, GUIUtil::dateTimeStr(pWalletTx->GetTxTime()));
-            itemOutput->setData(COLUMN_DATE, Qt::UserRole, QVariant((qlonglong)pWalletTx->GetTxTime()));
+            itemOutput->setText(COLUMN_DATE, GUIUtil::dateTimeStr(nTimeTx));
+            itemOutput->setData(COLUMN_DATE, Qt::UserRole, QVariant((qlonglong)nTimeTx));
 
             //Confirmations
-            itemOutput->setText(COLUMN_CONFIRMATIONS, QString::number(pWalletTx->GetDepthInMainChain()));
-            itemOutput->setData(COLUMN_CONFIRMATIONS, Qt::UserRole, QVariant((qlonglong)pWalletTx->GetDepthInMainChain()));
+            itemOutput->setText(COLUMN_CONFIRMATIONS, QString::number(nDepth));
+            itemOutput->setData(COLUMN_CONFIRMATIONS, Qt::UserRole, QVariant((qlonglong)nDepth));
 
             // transaction hash
             itemOutput->setText(COLUMN_TXHASH, QString::fromStdString(txid.GetHex()));
