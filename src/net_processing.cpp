@@ -1403,22 +1403,24 @@ inline void static SendBlockTransactions(const CBlock& block, const BlockTransac
 bool GetZerocoinSpendProofs(const CTxIn &txin, std::vector<libzerocoin::SerialNumberSoKProof> &proofsOut)
 {
     auto newSpend = TxInToZerocoinSpend(txin);
-    //see if we have record of the accumulator used in the spend tx
-    CBigNum bnAccumulatorValue = 0;
-    {
-        LOCK(cs_main);
-        if (!pzerocoinDB->ReadAccumulatorValue(newSpend->getAccumulatorChecksum(), bnAccumulatorValue))
-            return false;
-    }
-
-    libzerocoin::Accumulator accumulator(Params().Zerocoin_Params(), newSpend->getDenomination(), bnAccumulatorValue);
-
-    //Check that the coin has been accumulated
-    std::string strError;
-    if (!newSpend->Verify(accumulator, strError, false)) {
-        LogPrintf("%s: Zerocoinspend could not verify. Details: %s\n", __func__, strError);
+    if (!newSpend)
         return false;
-    }
+//    //see if we have record of the accumulator used in the spend tx
+//    CBigNum bnAccumulatorValue = 0;
+//    {
+//        LOCK(cs_main);
+//        if (!pzerocoinDB->ReadAccumulatorValue(newSpend->getAccumulatorChecksum(), bnAccumulatorValue))
+//            return false;
+//    }
+//
+//    libzerocoin::Accumulator accumulator(Params().Zerocoin_Params(), newSpend->getDenomination(), bnAccumulatorValue);
+//
+//    //Check that the coin has been accumulated
+//    std::string strError;
+//    if (!newSpend->Verify(accumulator, strError, false)) {
+//        LogPrintf("%s: Zerocoinspend could not verify. Details: %s\n", __func__, strError);
+//        return false;
+//    }
 
     libzerocoin::SerialNumberSoKProof proof(newSpend->getSmallSoK(), newSpend->getCoinSerialNumber(),
                                newSpend->getSerialComm(), newSpend->getHashSig());
@@ -1482,10 +1484,10 @@ void ProcessStaging()
         int nHighestBlockCheck = 0;
         for (auto &blockPair : mapStagedBlocksCopy) {
             // Likely do not have the accumulator checkpoint so cannot verify
-            if (blockPair.first > nHaveCheckpointHeight) {
-                setRemoveBlocks.insert(blockPair.first);
-                continue;
-            }
+//            if (blockPair.first > nHaveCheckpointHeight) {
+//                setRemoveBlocks.insert(blockPair.first);
+//                continue;
+//            }
             // Signatures for this block have already been verified, skip
             if (blockPair.second.fSignaturesVerified)
                 continue;
@@ -1529,6 +1531,7 @@ void ProcessStaging()
         // Now verify the batched spends
         bool fVerificationSuccess = true;
         // Probably not worth verifying if it is only one proof
+        int64_t nTimeBatchVerify = GetTimeMicros();
         int nHeightLastCheckpoint = Checkpoints::GetLastCheckpointHeight(Params().Checkpoints());
         if (vProofs.size() > 1) {
             if (nHighestBlockCheck > nHeightLastCheckpoint) {
@@ -1538,8 +1541,8 @@ void ProcessStaging()
                     fVerificationSuccess = false;
                 }
             }
+            LogPrint(BCLog::BENCH, "    - Staging Batch Verify: %.2fms \n", 0.001 * (GetTimeMicros() - nTimeBatchVerify));
         }
-
         if (fVerificationSuccess) {
             {
                 LOCK(cs_staging);
@@ -3065,8 +3068,12 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 CBlockIndex* pindexPrev = mapBlockIndex.at(pblock->hashPrevBlock);
                 int nHeightBlock = pindexPrev->nHeight + 1;
 
+                bool isForReorg = nHeightBlock <= nHeightNext - 1 && !chainActive.Contains(pindexPrev);
+                if (isForReorg)
+                    LogPrintf("%s: ******* reorg in staging block %s\n", __func__, pblock->GetHash().GetHex());
+
                 //We need the full block data to process it
-                if (pblock->hashPrevBlock == Params().GenesisBlock().GetHash() || pindexPrev->nChainTx > 0) {
+                if (pblock->hashPrevBlock == Params().GenesisBlock().GetHash() || pindexPrev->nChainTx > 0 || isForReorg) {
                     fProcessBlock = true;
                 } else if (forceProcessing && nHeightBlock - nHeightNext < ASK_FOR_BLOCKS + 10 && nHeightNext <= nHeightBlock) {
                     //Keep a few blocks cached so we don't fetch them over and over

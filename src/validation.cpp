@@ -742,7 +742,7 @@ static bool AcceptToMemoryPoolWorker(const CChainParams& chainparams, CTxMemPool
                     if (pool.HaveKeyImage(ki, txidKeyImage))
                         return state.Invalid(false, REJECT_DUPLICATE, "keyimage-already-known");
                     if (pblocktree->ReadRCTKeyImage(ki, txidKeyImage)) {
-                        LogPrintf("%s: Key image in tx %s\n", __func__, txidKeyImage.GetHex());
+                        LogPrint(BCLog::NET, "%s: Used key image in tx %s\n", __func__, txidKeyImage.GetHex());
                         return state.Invalid(false, REJECT_DUPLICATE, "bad-anonin-dup-keyimage");
                     }
 

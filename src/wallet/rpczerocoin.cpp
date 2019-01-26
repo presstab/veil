@@ -39,7 +39,7 @@ UniValue mintzerocoin(const JSONRPCRequest& request)
 
     if (request.fHelp || params.size() < 1 || params.size() > 3)
         throw std::runtime_error(
-                "mintzerocoin amount ( utxos )\n"
+                "mintzerocoin amount ( allowbasecoin utxos )\n"
                 "\nMint the specified zerocoin amount\n"
                 "\nArguments:\n"
                 "1. amount      (numeric, required) Enter an amount of veil to convert to zerocoin\n"
@@ -113,7 +113,7 @@ UniValue mintzerocoin(const JSONRPCRequest& request)
     }
 
     if (inputtype == OUTPUT_NULL)
-        throw JSONRPCError(RPC_WALLET_ERROR, "Insufficient Balance");
+        throw JSONRPCError(RPC_WALLET_INSUFFICIENT_FUNDS, "Insufficient Balance");
 
     if (params.size() > 2) {
         UniValue outputs = params[2].get_array();

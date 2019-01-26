@@ -3652,6 +3652,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransac
     return true;
 }
 
+std::set<uint256> setHashProofUsed;
 bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits, CMutableTransaction& txNew, unsigned int& nTxNewTime)
 {
     // The following split & combine thresholds are important to security
@@ -3707,6 +3708,10 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
         if (state == ThresholdState::ACTIVE || state == ThresholdState::LOCKED_IN)
             fWeightStake = true;
         if (Stake(stakeInput.get(), nBits, pindexFrom->GetBlockTime(), nTxNewTime, pindexBest, hashProofOfStake, fWeightStake)) {
+            if (setHashProofUsed.count(hashProofOfStake))
+                continue;
+            setHashProofUsed.emplace(hashProofOfStake);
+
             int nHeight = 0;
             {
                 LOCK(cs_main);
@@ -3719,7 +3724,7 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
             }
 
             // Found a kernel
-            LogPrintf("CreateCoinStake : kernel found\n");
+            LogPrintf("CreateCoinStake : kernel found. Timestamp=%d denom=%s\n", nTxNewTime, FormatMoney(stakeInput->GetValue()));
             nCredit += stakeInput->GetValue();
 
             // Calculate reward
@@ -3799,6 +3804,8 @@ bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<CStakeInput> >& listInp
             }
         }
         if (meta.nVersion < CZerocoinMint::STAKABLE_VERSION)
+            continue;
+        if (meta.denom == libzerocoin::CoinDenomination::ZQ_TEN && chainActive.Height() - meta.nHeight > 15000)
             continue;
         if (meta.nHeight < chainActive.Height() - Params().Zerocoin_RequiredStakeDepth()) {
             std::unique_ptr<ZerocoinStake> input(new ZerocoinStake(meta.denom, meta.hashStake));
