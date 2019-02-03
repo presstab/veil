@@ -1795,6 +1795,15 @@ int AnonWallet::AddStandardInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx,
         // That should only happen on the first pass through the loop.
         coin_selection_params.use_bnb = nSubtractFeeFromAmount == 0; // If we are doing subtract fee from recipient, then don't use BnB
 
+        //If no change address is set, then generate a new stealth address to use for change
+        CStealthAddress changeAddress;
+        if (!coinControl || (coinControl && coinControl->destChange.type() == typeid(CNoDestination))) {
+            if (!NewStealthKey(changeAddress, 0, nullptr)) {
+                error("%s: failed to generate stealth address to use for change", __func__);
+                return 1;
+            }
+        }
+
         // Start with no fee and loop until there is enough fee
         while (true) {
             if (!fZerocoinInputs) {
@@ -1848,13 +1857,7 @@ int AnonWallet::AddStandardInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx,
 
                 //If no change address is set, then generate a new stealth address to use for change
                 if (!coinControl || (coinControl && coinControl->destChange.type() == typeid(CNoDestination))) {
-                    CStealthAddress stealthAddress;
-                    if (!NewStealthKey(stealthAddress, 0, nullptr)) {
-                        error("%s: failed to generate stealth address to use for change", __func__);
-                        return 1;
-                    }
-
-                    r.address = stealthAddress;
+                    r.address = changeAddress;
                 }
 
                 if (!SetChangeDest(coinControl, r, sError)) {
@@ -2295,6 +2298,13 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
         size_t nSubFeeTries = 100;
         bool pick_new_inputs = true;
         CAmount nValueIn = 0;
+
+        CStealthAddress changeAddress;
+        if (!NewStealthKey(changeAddress, 0, nullptr)) {
+            error("%s: failed to generate stealth address to use for change: %s", __func__, sError);
+            return 1;
+        }
+
         // Start with no fee and loop until there is enough fee
         while (true) {
             txNew.vin.clear();
@@ -2338,14 +2348,8 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
                 r.fChange = true;
 
                 //If no change address is set, then generate a new stealth address to use for change
-                if (!coinControl || ((coinControl && coinControl->destChange.type() == typeid(CNoDestination)))) {
-                    CStealthAddress stealthAddress;
-                    if (!NewStealthKey(stealthAddress, 0, nullptr)) {
-                        error("%s: failed to generate stealth address to use for change: %s", __func__, sError);
-                        return 1;
-                    }
-                    r.address = stealthAddress;
-                }
+                if (!coinControl || ((coinControl && coinControl->destChange.type() == typeid(CNoDestination))))
+                    r.address = changeAddress;
 
                 if (!SetChangeDest(coinControl, r, sError)) {
                     return wserrorN(1, sError, __func__, ("SetChangeDest failed: " + sError));
@@ -2987,6 +2991,10 @@ int AnonWallet::AddAnonInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, std
         bool pick_new_inputs = true;
         CAmount nValueIn = nInputValue;
 
+        CStealthAddress changeAddress;
+        if (!NewStealthKey(changeAddress, 0, nullptr))
+            return error("%s: failed to generate stealth address to use for change: %s", __func__, sError);
+
         // Start with no fee and loop until there is enough fee
         int nIterations = 0;
         while (true) {
@@ -3030,12 +3038,8 @@ int AnonWallet::AddAnonInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, std
                 recipient.fChange = true;
 
                 //If no change address is set, then generate a new stealth address to use for change
-                if (!coinControl || ((coinControl && coinControl->destChange.type() == typeid(CNoDestination)))) {
-                    CStealthAddress stealthAddress;
-                    if (!NewStealthKey(stealthAddress, 0, nullptr))
-                        return error("%s: failed to generate stealth address to use for change: %s", __func__, sError);
-                    recipient.address = stealthAddress;
-                }
+                if (!coinControl || ((coinControl && coinControl->destChange.type() == typeid(CNoDestination))))
+                    recipient.address = changeAddress;
 
                 if (!SetChangeDest(coinControl, recipient, sError))
                     return error("%s: SetChangeDest failed: %s", __func__, sError);
