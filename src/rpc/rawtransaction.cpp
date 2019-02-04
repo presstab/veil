@@ -1439,6 +1439,7 @@ UniValue decodepsbt(const JSONRPCRequest& request)
         UniValue in(UniValue::VOBJ);
         // UTXOs
         if (!input.witness_utxo.IsNull()) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             const CTxOut& txout = input.witness_utxo;
 
             UniValue out(UniValue::VOBJ);
@@ -1451,11 +1452,13 @@ UniValue decodepsbt(const JSONRPCRequest& request)
             out.pushKV("scriptPubKey", o);
             in.pushKV("witness_utxo", out);
         } else if (input.non_witness_utxo) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             UniValue non_wit(UniValue::VOBJ);
             TxToUniv(*input.non_witness_utxo, uint256(), non_wit, false);
             in.pushKV("non_witness_utxo", non_wit);
             total_in += input.non_witness_utxo->vpout[psbtx.tx->vin[i].prevout.n]->GetValue();
         } else {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             have_all_utxos = false;
         }
 

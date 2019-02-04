@@ -10,6 +10,7 @@
 #include <primitives/transaction.h>
 #include <script/standard.h>
 #include <uint256.h>
+#include <logging.h>
 
 typedef std::vector<unsigned char> valtype;
 
@@ -236,29 +237,37 @@ bool ProduceSignature(const SigningProvider& provider, const BaseSignatureCreato
 bool SignPSBTInput(const SigningProvider& provider, const CMutableTransaction& tx, PSBTInput& input, SignatureData& sigdata, int index, int sighash)
 {
     // if this input has a final scriptsig or scriptwitness, don't do anything with it
+    LogPrintf("%s:%s\n", __func__, __LINE__);
     if (!input.final_script_sig.empty() || !input.final_script_witness.IsNull()) {
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         return true;
     }
-
+    LogPrintf("%s:%s\n", __func__, __LINE__);
     // Fill SignatureData with input info
     input.FillSignatureData(sigdata);
 
     // Get UTXO
     bool require_witness_sig = false;
+    LogPrintf("%s:%s\n", __func__, __LINE__);
     CTxOut utxo;
     if (input.non_witness_utxo) {
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         // If we're taking our information from a non-witness UTXO, verify that it matches the prevout.
         if (input.non_witness_utxo->GetHash() != tx.vin[index].prevout.hash) return false;
         // If both witness and non-witness UTXO are provided, verify that they match. This check shouldn't
         // matter, as the PSBT deserializer enforces only one of both is provided, and the only way both
         // can be present is when they're added simultaneously by FillPSBT (in which case they always match).
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         // Still, check in order to not rely on callers to enforce this.
         CTxOut utxoCheck;
         if (!input.non_witness_utxo->vpout[tx.vin[index].prevout.n]->GetTxOut(utxoCheck))
             return false;
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         if (!input.witness_utxo.IsNull() && utxoCheck != input.witness_utxo) return false;
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         utxo = utxoCheck;
     } else if (!input.witness_utxo.IsNull()) {
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         utxo = input.witness_utxo;
         // When we're taking our information from a witness UTXO, we can't verify it is actually data from
         // the output being spent. This is safe in case a witness signature is produced (which includes this
@@ -266,9 +275,10 @@ bool SignPSBTInput(const SigningProvider& provider, const CMutableTransaction& t
         // a witness signature in this situation.
         require_witness_sig = true;
     } else {
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         return false;
     }
-
+    LogPrintf("%s:%s\n", __func__, __LINE__);
     std::vector<uint8_t> amount(8);
     memcpy(amount.data(), &utxo.nValue, 8);
     MutableTransactionSignatureCreator creator(&tx, index, amount, sighash);
@@ -276,6 +286,7 @@ bool SignPSBTInput(const SigningProvider& provider, const CMutableTransaction& t
     bool sig_complete = ProduceSignature(provider, creator, utxo.scriptPubKey, sigdata);
     // Verify that a witness signature was produced in case one was required.
     if (require_witness_sig && !sigdata.witness) return false;
+    LogPrintf("%s:%s\n", __func__, __LINE__);
     input.FromSignatureData(sigdata);
     return sig_complete;
 }

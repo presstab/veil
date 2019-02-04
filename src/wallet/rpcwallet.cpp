@@ -4774,6 +4774,7 @@ bool FillPSBT(const CWallet* pwallet, PartiallySignedTransaction& psbtx, const C
     LOCK(pwallet->cs_wallet);
     // Get all of the previous transactions
     bool complete = true;
+    LogPrintf("%s:%s\n", __func__, __LINE__);
     for (unsigned int i = 0; i < txConst->vin.size(); ++i) {
         const CTxIn& txin = txConst->vin[i];
         PSBTInput& input = psbtx.inputs.at(i);
@@ -4782,6 +4783,7 @@ bool FillPSBT(const CWallet* pwallet, PartiallySignedTransaction& psbtx, const C
         const uint256& txhash = txin.prevout.hash;
         const auto it = pwallet->mapWallet.find(txhash);
         if (it != pwallet->mapWallet.end()) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             const CWalletTx& wtx = it->second;
             auto pout = wtx.tx->vpout[txin.prevout.n];
             // Update both UTXOs from the wallet.
@@ -4791,30 +4793,48 @@ bool FillPSBT(const CWallet* pwallet, PartiallySignedTransaction& psbtx, const C
                 return error("%s: failed to get txout from output", __func__);
             input.witness_utxo = utxo;
         }
-
+        CTransactionRef txRef;
+        uint256 hashblock;
+        if (!GetTransaction(txhash, txRef, Params().GetConsensus(), hashblock, true)) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
+        } else {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
+            input.non_witness_utxo = txRef;
+            auto pout = txRef->vpout[txin.prevout.n];
+            CTxOut utxo;
+            if (!pout->GetTxOut(utxo))
+                return error("%s: failed to get txout from output", __func__);
+            input.witness_utxo = utxo;
+        }
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         // Get the Sighash type
         if (sign && input.sighash_type > 0 && input.sighash_type != sighash_type) {
             throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "Specified Sighash and sighash in PSBT do not match.");
         }
-
+        LogPrintf("%s:%s\n", __func__, __LINE__);
         SignatureData sigdata;
         if (sign) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             complete &= SignPSBTInput(*pwallet, *psbtx.tx, input, sigdata, i, sighash_type);
         } else {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             complete &= SignPSBTInput(PublicOnlySigningProvider(pwallet), *psbtx.tx, input, sigdata, i, sighash_type);
         }
 
         if (it != pwallet->mapWallet.end()) {
             // Drop the unnecessary UTXO if we added both from the wallet.
             if (sigdata.witness) {
+                LogPrintf("%s:%s\n", __func__, __LINE__);
                 input.non_witness_utxo = nullptr;
             } else {
+                LogPrintf("%s:%s\n", __func__, __LINE__);
                 input.witness_utxo.SetNull();
             }
         }
 
         // Get public key paths
         if (bip32derivs) {
+            LogPrintf("%s:%s\n", __func__, __LINE__);
             for (const auto& pubkey_it : sigdata.misc_pubkeys) {
                 AddKeypathToMap(pwallet, pubkey_it.first, input.hd_keypaths);
             }
