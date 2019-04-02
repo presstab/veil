@@ -4193,7 +4193,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     //Next block, give about 5 seconds before asking for it again
                     auto mi = mapRequestedBlocks.find(inv.hash);
                     if (mi != mapRequestedBlocks.end()) {
-                        if (GetTime() - mi->second < 5)
+                        if (GetTime() - mi->second < 2)
                             fRequest = false;
                     }
                 } else if (pindex->nHeight > nBestHeight + 1) {
@@ -4204,11 +4204,11 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
                     auto mi = mapRequestedBlocks.find(inv.hash);
                     if (mi != mapRequestedBlocks.end()) {
-                        if (GetTime() - mi->second < 5)
+                        if (GetTime() - mi->second < 2)
                             fRequest = false;
                     } else if (mapBlockSource.count(inv.hash)) {
                         // Already have this block, so consider it requested
-                        mapRequestedBlocks.emplace(inv.hash, GetTime());
+                        mapRequestedBlocks.emplace(inv.hash, GetTime() - 1);
                         fRequest = false;
                     } else if (pindexBestHeader->GetAncestor(pindex->nHeight)) {
                         auto hashCheck = pindexBestHeader->GetAncestor(pindex->nHeight)->GetBlockHash();
