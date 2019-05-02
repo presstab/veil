@@ -2656,7 +2656,6 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
 
             // Include more fee and try again.
             nFeeRet = nFeeNeeded;
-            continue;
         }
         coinControl->nChangePos = nChangePosInOut;
 
@@ -4373,20 +4372,23 @@ bool AnonWallet::ProcessStealthOutput(const CTxDestination &address, std::vector
                 //continue;
             }
         }
-
+        LogPrintf("******************%s:%d\n", __func__, __LINE__);
         return true;
     }
 
     // Iterate through owned stealth addresses to see if this was sent to one of them (note: the address sent to is
     // extracted from the stealth address in a deterministic way, so the owned addresses are calculate the changes to
     // see if there is a match, if so the key belongs to us
+    LogPrintf("******************%s:%d %s\n", __func__, __LINE__, idStealthDestination.GetHex());
     for (auto mi = mapStealthAddresses.begin(); mi != mapStealthAddresses.end(); ++mi) {
         auto* addr = &mi->second;
         if (!MatchPrefix(addr->prefix.number_bits, addr->prefix.bitfield, prefix, fHavePrefix)) {
+            LogPrintf("******************%s:%d\n", __func__, __LINE__);
             continue;
         }
 
         if (!addr->scan_secret.IsValid()) {
+            LogPrintf("******************%s:%d\n", __func__, __LINE__);
             continue; // stealth address is not owned
         }
 
@@ -4397,6 +4399,7 @@ bool AnonWallet::ProcessStealthOutput(const CTxDestination &address, std::vector
 
         CPubKey pubKeyStealthSecret(pkExtracted);
         if (!pubKeyStealthSecret.IsValid()) {
+            LogPrintf("******************%s:%d\n", __func__, __LINE__);
             continue;
         }
 
@@ -4439,7 +4442,7 @@ bool AnonWallet::ProcessStealthOutput(const CTxDestination &address, std::vector
             LogPrintf("%s: Spend key mismatch!\n", __func__);
             continue;
         }
-
+        LogPrintf("******************%s:%d\n", __func__, __LINE__);
         //Since the new key is not derived through Ext, for now keep it in CWallet keystore
         bool fSuccess = true;
         if (!pwalletParent->AddKeyPubKey(keySharedSecret, pkT)) {
@@ -4559,7 +4562,7 @@ bool AnonWallet::ScanForOwnedOutputs(const CTransaction &tx, size_t &nCT, size_t
         if (txout->IsType(OUTPUT_CT)) {
             nCT++;
             const CTxOutCT *ctout = (CTxOutCT*) txout.get();
-
+            LogPrintf("******************%s:%d\n", __func__, __LINE__);
             CTxDestination address;
             if (!ExtractDestination(ctout->scriptPubKey, address)
                 || address.type() != typeid(CKeyID)) {
@@ -4587,8 +4590,9 @@ bool AnonWallet::ScanForOwnedOutputs(const CTransaction &tx, size_t &nCT, size_t
 
             if (ProcessStealthOutput(address, vchEphemPK, prefix, fHavePrefix, sShared)) {
                 fIsMine = true;
+                LogPrintf("******************%s:%d\n", __func__, __LINE__);
             }
-
+            LogPrintf("******************%s:%d\n", __func__, __LINE__);
             continue;
         } else if (txout->IsType(OUTPUT_RINGCT)) {
             nRingCT++;
@@ -4684,6 +4688,7 @@ void AnonWallet::RescanWallet()
     view.SetBackend(viewMemPool);
 
     std::set<uint256> setErase;
+    bool fOwnInputs = false;
     for (auto mi = mapRecords.begin(); mi != mapRecords.end(); mi++) {
         uint256 txid = mi->first;
         CTransactionRecord* txrecord = &mi->second;
@@ -4969,19 +4974,19 @@ int AnonWallet::InsertTempTxn(const uint256 &txid, const CTransactionRecord *rtx
 bool AnonWallet::OwnBlindOut(AnonWalletDB *pwdb, const uint256 &txhash, const CTxOutCT *pout, COutputRecord &rout,
         CStoredTransaction &stx, bool &fUpdated)
 {
-    isminetype mine = IsMine(pout);
-    if (!(mine & ISMINE_ALL)) {
-        return 0;
-    }
+//    isminetype mine = IsMine(pout);
+//    if (!(mine & ISMINE_ALL)) {
+//        return 0;
+//    }
 
     rout.nType = OUTPUT_CT;
 
-    if (mine & ISMINE_SPENDABLE) {
-        rout.nFlags |= ORF_OWNED;
-    } else {
-        rout.nFlags |= ORF_WATCHONLY;
-    }
-
+//    if (mine & ISMINE_SPENDABLE) {
+//        rout.nFlags |= ORF_OWNED;
+//    } else {
+//        rout.nFlags |= ORF_WATCHONLY;
+//    }
+    LogPrintf("******************%s:%d\n", __func__, __LINE__);
     if (IsLocked()) {
         COutPoint op(txhash, rout.n);
         if ((rout.nFlags & ORF_LOCKED)
@@ -4994,7 +4999,7 @@ bool AnonWallet::OwnBlindOut(AnonWalletDB *pwdb, const uint256 &txhash, const CT
         }
         return true;
     }
-
+    LogPrintf("******************%s:%d\n", __func__, __LINE__);
     CScript scriptPubKey;
     if (!pout->GetScriptPubKey(scriptPubKey))
         return error("%s: GetScriptPubKey failed.", __func__);

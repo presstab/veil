@@ -138,6 +138,58 @@ static UniValue restoreaddresses(const JSONRPCRequest &request)
     return NullUniValue;
 }
 
+static UniValue claimstealthtransaction(const JSONRPCRequest &request)
+{
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(wallet.get(), request.fHelp))
+        return NullUniValue;
+
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+                "claimstealthtransaction (txid)\n"
+                "Regenerates deterministic stealth addresses to give wallet knowledge that they are owned"
+                + HelpRequiringPassphrase(wallet.get()) +
+                "\nArguments:\n"
+                "1. txid       (string, required) The transaction hex.\n"
+                "\nResult:\n"
+                "\"success\"              (bool) Whether the transaction is owned by the wallet\n"
+                "\nExamples:\n"
+                + HelpExampleCli("claimstealthtransaction", "txid")
+                + HelpExampleRpc("claimstealthtransaction", "txid"));
+
+    uint256 hash;
+    hash.SetHex(request.params[0].get_str());
+
+
+    auto pAnonWallet = wallet->GetAnonWallet();
+    LOCK2(cs_main, wallet->cs_wallet);
+
+    CTransactionRef ptx;
+    uint256 hashBlock;
+    if (!GetTransaction(hash, ptx, Params().GetConsensus(), hashBlock, true))
+        return JSONRPCError(RPC_INVALID_PARAMETER, _("Could not locate transaction"));
+
+    AnonWalletDB pwdb(wallet->GetDBHandle());
+    bool fFound = false;
+    for (unsigned int i = 0; i < ptx->vpout.size(); i++) {
+        if (ptx->vpout[i]->GetType() == OUTPUT_CT) {
+            bool fUpdated = false;
+            CTxOutCT* ctout = (CTxOutCT*)ptx->vpout[i].get();
+            CStoredTransaction stx;
+            COutputRecord rout;
+            rout.n = i;
+            mapValue_t mapNarr;
+            size_t nCT = 0, nRingCT = 0;
+            pAnonWallet->ScanForOwnedOutputs(*ptx, nCT, nRingCT, mapNarr);
+            if (pAnonWallet->OwnBlindOut(&pwdb, hash, ctout, rout, stx, fUpdated))
+                fFound = true;
+        }
+    }
+
+    return fFound;
+
+}
+
 static UniValue rescanringctwallet(const JSONRPCRequest &request)
 {
     std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
@@ -1888,6 +1940,7 @@ static const CRPCCommand commands[] =
                 { "wallet",             "getnewaddress",             &getnewaddress,          {"label","num_prefix_bits","prefix_num","bech32","makeV2"} },
                 { "wallet",             "restoreaddresses",          &restoreaddresses,          {"generate_count"} },
                 { "wallet",             "rescanringctwallet",          &rescanringctwallet,          {} },
+                { "wallet",             "claimstealthtransaction",     &claimstealthtransaction,          {"txid"} },
 
                 { "wallet",             "sendbasecointostealth", &sendbasecointostealth,               {"address","amount","comment","comment_to","subtractfeefromamount","narration"} },
 

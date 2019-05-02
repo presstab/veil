@@ -205,6 +205,7 @@ static const CRPCConvertParam vRPCConvertParams[] =
     { "showspendcaching", 0, "fVerbose"},
     { "startprecomputing", 0, "nBlockPerCycle"},
     { "setprecomputeblockpercycle", 0, "nBlockPerCycle"},
+    { "txid", 0, "txid"},
 };
 
 class CRPCConvertTable
