@@ -1315,14 +1315,14 @@ bool AnonWallet::ExpandTempRecipients(std::vector<CTempRecipient> &vecSend, std:
                 i++; // skip over inserted output
             } else {
                 if (r.address.type() == typeid(CExtKeyPair)) {
-                    throw std::runtime_error(strprintf("%s: sending to extkeypair", __func__));
+                    return error("%s: sending to extkeypair", __func__);
                 } else if (r.address.type() == typeid(CKeyID)) {
                     r.scriptPubKey = GetScriptForDestination(r.address);
                 } else {
                     if (!r.fScriptSet) {
                         r.scriptPubKey = GetScriptForDestination(r.address);
                         if (r.scriptPubKey.empty()) {
-                            return wserrorN(1, sError, __func__, "Unknown address type and no script set.");
+                            return error("%s: Unknown address type and no script set.", __func__);
                         }
                     }
                 }
@@ -1364,7 +1364,7 @@ bool AnonWallet::ExpandTempRecipients(std::vector<CTempRecipient> &vecSend, std:
                         return error("%s: failed to record stealth destination", __func__);
                 }
             } else if (r.address.type() == typeid(CExtKeyPair)) {
-                throw std::runtime_error(strprintf("%s: sending to extkeypair", __func__));
+                return error("%s: sending to extkeypair", __func__);
             } else if (r.address.type() == typeid(CKeyID)) {
                 // Need a matching public key
                 CKeyID idTo = boost::get<CKeyID>(r.address);
@@ -2729,9 +2729,7 @@ int AnonWallet::AddBlindedInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, 
             nLastBlinded = nChangePosInOut; // Use the change output
         } else if (nLastBlinded != -1) {
             vpBlinds.pop_back();
-        }
 
-        if (nLastBlinded != -1) {
             auto &r = vecSend[nLastBlinded];
             if (r.nType != OUTPUT_CT && r.nType != OUTPUT_RINGCT) {
                 return wserrorN(1, sError, __func__, "nLastBlinded not blind.");

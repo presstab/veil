@@ -54,7 +54,7 @@ public:
         if (pos == keyValuesMap.end()) {
             items.push_front(key);
             keyValuesMap[key] = { value, items.begin() };
-            if (keyValuesMap.size() > csize) {
+            if (keyValuesMap.size() > csize && !items.empty()) {
                 keyValuesMap.erase(items.back());
                 items.pop_back();
             }

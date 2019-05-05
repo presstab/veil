@@ -199,8 +199,10 @@ BITCOIN_CORE_H = \
   veil/ringct/extkey.h \
   veil/ringct/anonwallet.h \
   veil/ringct/anonwalletdb.h \
+  veil/ringct/ec_commitment.h \
   veil/ringct/keyutil.h \
   veil/ringct/outputrecord.h \
+  veil/ringct/rangeproof.h \
   veil/ringct/rctindex.h \
   veil/ringct/rpcanonwallet.h \
   veil/ringct/stealth.h \
@@ -542,7 +544,9 @@ libbitcoin_common_a_SOURCES = \
   veil/ringct/anon.cpp \
   veil/ringct/blind.cpp \
   key.cpp \
+  veil/ringct/ec_commitment.cpp \
   veil/ringct/keyutil.cpp \
+  veil/ringct/rangeproof.cpp \
   veil/ringct/stealth.cpp \
   veil/ringct/extkey.cpp \
   key_io.cpp \
