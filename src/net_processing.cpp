@@ -79,6 +79,8 @@ static CCriticalSection g_cs_orphans;
 std::map<uint256, COrphanTx> mapOrphanTransactions GUARDED_BY(g_cs_orphans);
 std::map<int, CBlock> mapStagedBlocks;
 static constexpr int ASK_FOR_BLOCKS = 50; //How many blocks to ask for at once
+static constexpr int ASK_FOR_HEIGHT_ADVANCE = 1000; //How many blocks above chain tip to request
+static constexpr int TIME_TOLERANCE_PEER_DELAY = 2; //How many seconds until a block should be requested from a different peer
 static CCriticalSection cs_staging;
 
 void EraseOrphansFor(NodeId peer);
@@ -563,9 +565,9 @@ static void FindNextBlocksToDownload(NodeId nodeid, unsigned int count, std::vec
     // Never fetch further than the best block we know the peer has, or more than BLOCK_DOWNLOAD_WINDOW + 1 beyond the last
     // linked block we have in common with this peer. The +1 is so we can detect stalling, namely if we would be able to
     // download that next block if the window were 1 larger.
-    int nWindowEnd = state->pindexLastCommonBlock->nHeight + ASK_FOR_BLOCKS;
+    int nWindowEnd = state->pindexLastCommonBlock->nHeight + ASK_FOR_HEIGHT_ADVANCE;
     int nMaxHeight = std::min<int>(state->pindexBestKnownBlock->nHeight, nWindowEnd + 1);
-    nMaxHeight = std::min(nMaxHeight, chainActive.Height() + ASK_FOR_BLOCKS);
+    nMaxHeight = std::min(nMaxHeight, chainActive.Height() + ASK_FOR_HEIGHT_ADVANCE);
     NodeId waitingfor = -1;
     LOCK(cs_staging);
     while (pindexWalk->nHeight < nMaxHeight) {
@@ -3135,7 +3137,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                     (isForReorg && forceProcessing)) {
                     //We need the full block data to process it
                     fProcessBlock = true;
-                } else if (forceProcessing && nHeightBlock - nHeightNext < ASK_FOR_BLOCKS + 10 &&
+                } else if (forceProcessing && nHeightBlock - nHeightNext < ASK_FOR_HEIGHT_ADVANCE + 10 &&
                            nHeightNext <= nHeightBlock) {
                     fStageBlock = true;
                 } else {
@@ -3152,7 +3154,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         if (fStageBlock) {
             //Keep a few blocks cached so we don't fetch them over and over
-            if (mapStagedBlocks.size() < ASK_FOR_BLOCKS + 10) {
+            if (mapStagedBlocks.size() < ASK_FOR_HEIGHT_ADVANCE + 10) {
                 LOCK(cs_staging);
                 mapStagedBlocks.emplace(nHeightBlock, *pblock);
                 LogPrint(BCLog::STAGING, "staging block %s (%d) because only have prevheader and not prev block. Need:%d\n",
@@ -4205,21 +4207,21 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                 CInv inv(MSG_BLOCK | nFetchFlags, pindex->GetBlockHash());
                 // Always request the next block, even if redundant.
                 if (pindex->nHeight == nBestHeight + 1) {
-                    //Next block, give about 5 seconds before asking for it again
+                    //Next block, give about 2 seconds before asking for it again
                     auto mi = mapRequestedBlocks.find(inv.hash);
                     if (mi != mapRequestedBlocks.end()) {
-                        if (GetTime() - mi->second < 5)
+                        if (GetTime() - mi->second < TIME_TOLERANCE_PEER_DELAY)
                             fRequest = false;
                     }
                 } else if (pindex->nHeight > nBestHeight + 1) {
-                    if (mapStagedBlocks.size() > ASK_FOR_BLOCKS + 15) {
-                        LogPrint(BCLog::STAGING, "%s: Skipping request of blocks because staging is full", __func__);
+                    if (mapStagedBlocks.size() > ASK_FOR_HEIGHT_ADVANCE + 15) {
+                        LogPrint(BCLog::STAGING, "%s: Skipping request of blocks because staging is full\n", __func__);
                         break;
                     }
 
                     auto mi = mapRequestedBlocks.find(inv.hash);
                     if (mi != mapRequestedBlocks.end()) {
-                        if (GetTime() - mi->second < 5)
+                        if (GetTime() - mi->second < TIME_TOLERANCE_PEER_DELAY)
                             fRequest = false;
                     } else if (mapBlockSource.count(inv.hash)) {
                         // Already have this block, so consider it requested
