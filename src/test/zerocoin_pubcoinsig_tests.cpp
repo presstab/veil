@@ -22,6 +22,58 @@ std::string zerocoinModulus = "2519590847565789349402718324004839857142928212620
                               "8441436038339044149526344321901146575444541784240209246165157233507787077498171257724679629263863563732899121548"
                               "31438167899885040445364023527381951378636564391212010397122822120720357";
 
+BOOST_AUTO_TEST_CASE(multigroupequality)
+{
+    //Initialize groups that are used for zerocoin
+    CBigNum bnTrustedModulus = 0;
+    if (!bnTrustedModulus)
+        bnTrustedModulus.SetDec(zerocoinModulus);
+    libzerocoin::ZerocoinParams zerocoinParams = libzerocoin::ZerocoinParams(bnTrustedModulus);
+
+    auto accGroup = zerocoinParams.accumulatorParams.accumulatorPoKCommitmentGroup;
+    CBigNum g1 = accGroup.g;
+    CBigNum h1 = accGroup.h;
+    CBigNum mod1 = accGroup.modulus;
+
+    auto serialGroup = zerocoinParams.serialNumberSoKCommitmentGroup;
+    CBigNum g2 = serialGroup.g;
+    CBigNum h2 = serialGroup.h;
+    CBigNum mod2 = serialGroup.modulus;
+
+    //Create two pedersen commitments that use different groups, but commit to the same value
+    CBigNum bnX = CBigNum::randKBitBignum(256);
+    auto comFromAccParams = libzerocoin::Commitment(&accGroup, bnX);
+    auto comSerialParams = libzerocoin::Commitment(&serialGroup, bnX);
+
+    //! Step 1:  The prover commits to bits ofxin both groups
+
+    //Commit to bits of x in both groups by computing ui = g^(bi) h^(ri)
+    int nBitSecurityLevel = 80; // commit to 80 bits of x
+    arith_uint256 nX = bnX.getarith_uint256(); // have to use arith class to do bitwise operations
+
+    std::map<unsigned int, std::pair<libzerocoin::Commitment, libzerocoin::Commitment> > mapBitCommitments;
+    for (unsigned int i = 0; i < nBitSecurityLevel; i++) {
+        //Extract the specific bit to commit to
+        arith_uint256 nMask = 1;
+        nMask <<= i;
+        bnX.getarith_uint256();
+        arith_uint256 nBit = nX & nMask;
+
+        //Compute U
+        CBigNum bnBit(nBit);
+        Commitment comU = Commitment(&accGroup, bnBit);
+
+        //Compute V
+        Commitment comV = Commitment(&serialGroup, bnBit);
+
+        mapBitCommitments[i] = std::make_pair(comU, comV);
+    }
+
+    //! Step 2: The prover proves that the bits combine to yield x and y
+    
+}
+
+
 BOOST_AUTO_TEST_CASE(checkpubcoinsig_test)
 {
     RandomInit();
