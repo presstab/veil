@@ -12,6 +12,7 @@
 #include "validation.h"
 #include "stakeinput.h"
 #include "veil/proofofstake/kernel.h"
+#include "veil/ringct/blind.h"
 #ifdef ENABLE_WALLET
 #include "wallet/wallet.h"
 #endif
@@ -26,6 +27,7 @@ ZerocoinStake::ZerocoinStake(const libzerocoin::CoinSpend& spend)
     this->hashSerial = Hash(nSerial.begin(), nSerial.end());
     this->pindexFrom = nullptr;
     fMint = false;
+    m_type = STAKE_ZEROCOIN;
 }
 
 int ZerocoinStake::GetChecksumHeightFromMint()
@@ -210,4 +212,47 @@ bool ZerocoinStake::MarkSpent(CWallet *pwallet, const uint256& txid)
 uint256 ZerocoinStake::GetSerialStakeHash()
 {
     return hashSerial;
+}
+
+RingCtStakeCandidate::RingCtStakeCandidate(const CTransactionRecord& txrecord, const COutputRecord* pout) : m_txrecord(txrecord), m_pout(pout)
+{
+
+}
+
+// Uniqueness is the key image associated with this input
+CDataStream RingCtStakeCandidate::GetUniqueness()
+{
+    CDataStream ss(0,0);
+
+    //Lookup key image
+    CCmpPubKey keyimage;
+    if (!m_pout->GetKeyImage(keyimage)) {
+        CKeyID idStealth;
+        if (!m_pout->GetStealthID(idStealth)) {
+            error("%s:%d FAILED TO GET STEALTH ID FOR RCTCANDIDATE\n", __func__, __LINE__);
+            return ss;
+        }
+    }
+
+
+
+}
+
+PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout) : m_txin(txin)
+{
+    //Extract the pubkeyhash from the keyimage
+    const std::vector<uint8_t> vKeyImages = txin.scriptData.stack[0];
+    uint32_t nInputs, nRingSize;
+    txin.GetAnonInfo(nInputs, nRingSize);
+    const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[0]); //todo: have check that there is only one keyimage in a stake tx, should occur before this constructor, or else move the loading of the key image to not be in constructor
+    m_hashPubKey = ki.GetHash();
+
+    int nExp = 0;
+    int nMantissa = 0;
+    CAmount nMinValue = 0;
+    CAmount nMaxValue = 0;
+    GetRangeProofInfo(pout->vRangeproof, nExp, nMantissa, nMinValue, nMaxValue);
+    m_nMinimumValue = nMinValue;
+
+    m_type = STAKE_RINGCT;
 }

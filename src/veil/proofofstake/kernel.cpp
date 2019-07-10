@@ -63,7 +63,7 @@ void WeightStake(CAmount& nValueIn, const libzerocoin::CoinDenomination denom)
 }
 
 std::set<uint256> setFoundStakes;
-bool Stake(CStakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockFrom, unsigned int& nTimeTx, const CBlockIndex* pindexBest, uint256& hashProofOfStake, bool fWeightStake)
+bool Stake(StakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockFrom, unsigned int& nTimeTx, const CBlockIndex* pindexBest, uint256& hashProofOfStake, bool fWeightStake)
 {
     if (nTimeTx < nTimeBlockFrom)
         return error("Stake() : nTime violation");
@@ -133,7 +133,7 @@ bool Stake(CStakeInput* stakeInput, unsigned int nBits, unsigned int nTimeBlockF
 }
 
 // Check kernel hash target and coinstake signature
-bool CheckProofOfStake(CBlockIndex* pindexCheck, const CTransactionRef txRef, const uint32_t& nBits, const unsigned int& nTimeBlock, uint256& hashProofOfStake, std::unique_ptr<CStakeInput>& stake)
+bool CheckProofOfStake(CBlockIndex* pindexCheck, const CTransactionRef txRef, const uint32_t& nBits, const unsigned int& nTimeBlock, uint256& hashProofOfStake, std::unique_ptr<StakeInput>& stake)
 {
     if (!txRef->IsCoinStake())
         return error("CheckProofOfStake() : called on non-coinstake %s", txRef->GetHash().ToString().c_str());
@@ -147,7 +147,7 @@ bool CheckProofOfStake(CBlockIndex* pindexCheck, const CTransactionRef txRef, co
     auto spend = TxInToZerocoinSpend(txin);
     if (!spend)
         return false;
-    stake = std::unique_ptr<CStakeInput>(new ZerocoinStake(*spend.get()));
+    stake = std::unique_ptr<StakeInput>(new ZerocoinStake(*spend.get()));
     if (spend->getSpendType() != libzerocoin::SpendType::STAKE)
         return error("%s: spend is using the wrong SpendType (%d)", __func__, (int)spend->getSpendType());
 

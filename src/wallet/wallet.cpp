@@ -3749,7 +3749,7 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
     CAmount nBalance = GetBalance();
 
     // Get the list of stakable inputs
-    std::list<std::unique_ptr<ZerocoinStake> > listInputs;
+    std::list<std::unique_ptr<StakeInput> > listInputs;
     if (!SelectStakeCoins(listInputs, nBalance))
         return false;
 
@@ -3763,7 +3763,7 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
     CAmount nCredit = 0;
     CScript scriptPubKeyKernel;
     bool fKernelFound = false;
-    for (std::unique_ptr<ZerocoinStake>& stakeInput : listInputs) {
+    for (std::unique_ptr<StakeInput>& stakeInput : listInputs) {
         // Make sure the wallet is unlocked and shutdown hasn't been requested
         if (IsLocked() || ShutdownRequested())
             return false;
@@ -3854,7 +3854,7 @@ bool CWallet::CreateCoinStake(const CBlockIndex* pindexBest, unsigned int nBits,
     }
     return fKernelFound;
 }
-bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<ZerocoinStake> >& listInputs, CAmount nTargetAmount)
+bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<StakeInput> >& listInputs, CAmount nTargetAmount)
 {
     LOCK(cs_main);
 
@@ -3866,7 +3866,7 @@ bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<ZerocoinStake> >& listI
         nTimeLastUpdate = GetAdjustedTime();
     }
 
-    set<CMintMeta> setMints = zTracker->ListMints(true, true, fUpdate);
+    std::set<CMintMeta> setMints = zTracker->ListMints(true, true, fUpdate);
     for (auto meta : setMints) {
         if (meta.hashStake == uint256()) {
             CZerocoinMint mint;
@@ -3880,9 +3880,35 @@ bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<ZerocoinStake> >& listI
         if (meta.nVersion < CZerocoinMint::STAKABLE_VERSION)
             continue;
         if (meta.nHeight < chainActive.Height() - Params().Zerocoin_RequiredStakeDepth()) {
-            std::unique_ptr<ZerocoinStake> input(new ZerocoinStake(meta.denom, meta.hashStake));
+            std::unique_ptr<StakeInput> input(new ZerocoinStake(meta.denom, meta.hashStake));
             listInputs.emplace_back(std::move(input));
         }
+    }
+
+    /*
+     * void AnonWallet::AvailableAnonCoins(std::vector<COutputR> &vCoins, bool fOnlySafe, const CCoinControl *coinControl,
+        const CAmount& nMinimumAmount, const CAmount& nMaximumAmount, const CAmount& nMinimumSumAmount,
+        const uint64_t& nMaximumCount, const int& nMinDepth, const int& nMaxDepth, bool fIncludeImmature)
+     */
+
+    //todo time based activation here
+    std::vector<COutputR> vRctCoins;
+    pAnonWalletMain->AvailableAnonCoins(vRctCoins);
+    for (const COutputR& rctOut : vRctCoins) {
+        const CTransactionRecord& txrecord = rctOut.rtx->second;
+
+        //Check transaction age
+        if (GetAdjustedTime() - txrecord.nBlockTime > nStakeMinAge)
+            continue;
+
+        //Check output
+        const COutputRecord* pout = txrecord.GetOutput(rctOut.i);
+        if (pout->GetAmount() < Params().MinimumStakeQuantity())
+            continue;
+
+        //Create stake input and add to list of stakable inputs
+        std::unique_ptr<StakeInput> input(new RingCtStakeCandidate(txrecord, pout));
+        listInputs.emplace_back(std::move(input));
     }
 
     LogPrint(BCLog::BLOCKCREATION, "%s: FOUND %d STAKABLE ZEROCOINS\n", __func__, listInputs.size());
