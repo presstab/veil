@@ -4,6 +4,8 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <tinyformat.h>
+#include <secp256k1/include/secp256k1_mlsag.h>
+#include <wallet/coincontrol.h>
 #include "veil/zerocoin/accumulators.h"
 #include "veil/zerocoin/mintmeta.h"
 #include "chain.h"
@@ -12,8 +14,10 @@
 #include "validation.h"
 #include "stakeinput.h"
 #include "veil/proofofstake/kernel.h"
+#include "veil/ringct/blind.h"
 #ifdef ENABLE_WALLET
 #include "wallet/wallet.h"
+#include "veil/ringct/anonwallet.h"
 #endif
 
 typedef std::vector<unsigned char> valtype;
@@ -26,6 +30,7 @@ ZerocoinStake::ZerocoinStake(const libzerocoin::CoinSpend& spend)
     this->hashSerial = Hash(nSerial.begin(), nSerial.end());
     this->pindexFrom = nullptr;
     fMint = false;
+    m_type = STAKE_ZEROCOIN;
 }
 
 int ZerocoinStake::GetChecksumHeightFromMint()
@@ -287,4 +292,105 @@ bool ZerocoinStake::MarkSpent(CWallet *pwallet, const uint256& txid)
 uint256 ZerocoinStake::GetSerialStakeHash()
 {
     return hashSerial;
+}
+
+RingCtStakeCandidate::RingCtStakeCandidate(CWallet* pwallet, CTransactionRef ptx, const COutPoint& outpoint, const COutputRecord* pout) : m_outpoint(outpoint), m_pout(pout)
+{
+    m_tx = ptx;
+
+    AnonWallet* panonwallet = pwallet->GetAnonWallet();
+    AnonWalletDB wdb(pwallet->GetDBHandle());
+
+    //Get key image
+    CCmpPubKey keyimage;
+    if (!wdb.GetKeyImageFromOutpoint(m_outpoint, keyimage)) {
+        //Manually get the key image if possible.
+        CKeyID idStealth;
+        if (!m_pout->GetStealthID(idStealth)) {
+            error("%s:%d FAILED TO GET STEALTH ID FOR RCTCANDIDATE\n", __func__, __LINE__);
+            throw std::runtime_error("rct candidate failed.");
+        }
+
+        CKey keyStealth;
+        if (!panonwallet->GetKey(idStealth, keyStealth))
+            throw std::runtime_error("RingCtStakeCandidate failed to get stealth key");
+
+        CTxOutRingCT* txout = (CTxOutRingCT*)m_tx->vpout[m_outpoint.n].get();
+        if (secp256k1_get_keyimage(secp256k1_ctx_blind, keyimage.ncbegin(), txout->pk.begin(), keyStealth.begin()) != 0)
+            throw std::runtime_error("Unable to get key image");
+
+        if (!wdb.WriteKeyImageFromOutpoint(m_outpoint, keyimage))
+            error("%s: failed to write keyimage to disk.");
+    }
+
+    m_hashPubKey = keyimage.GetHash();
+    m_nAmount = m_pout->GetAmount();
+}
+
+// Uniqueness is the key image associated with this input
+CDataStream RingCtStakeCandidate::GetUniqueness()
+{
+    CDataStream ss(0,0);
+    ss << m_hashPubKey;
+    return ss;
+}
+
+
+//Indexfrom is the same for all rct candidates and is based on the current index minus a certain amount of blocks
+CBlockIndex* RingCtStakeCandidate::GetIndexFrom()
+{
+    int nCurrentHeight = chainActive.Height();
+    return chainActive.Tip()->GetAncestor(nCurrentHeight + 1 - Params().Zerocoin_RequiredStakeDepth());
+}
+
+bool RingCtStakeCandidate::CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 hashTxOut)
+{
+    AnonWallet* panonWallet = pwallet->GetAnonWallet();
+    CTransactionRef ptx = MakeTransactionRef();
+    CWalletTx wtx(pwallet, ptx);
+
+    //Add the input to coincontrol so that addanoninputs knows what to use
+    CCoinControl coinControl;
+    coinControl.Select(m_outpoint, m_nAmount);
+    coinControl.nCoinType = OUTPUT_RINGCT;
+
+    //Tell the rct code who the recipient is
+    std::vector<CTempRecipient> vecSend;
+    CTempRecipient tempRecipient;
+    tempRecipient.nType = OUTPUT_RINGCT;
+    tempRecipient.SetAmount(m_nAmount);
+    CStealthAddress address;
+    if (!panonWallet->GetStakeAddress(address))
+        return false;
+    tempRecipient.address = address;
+    tempRecipient.fSubtractFeeFromAmount = false;
+    tempRecipient.fExemptFeeSub = true;
+    vecSend.emplace_back(tempRecipient);
+
+    std::string strError;
+    CTransactionRecord rtx;
+    CAmount nFeeRet = 0;
+    if (0 != panonWallet->AddAnonInputs(wtx, rtx, vecSend, /*fSign*/false, /*nRingSize*/Params().DefaultRingSize(), /*nInputsPerSig*/32, nFeeRet, &coinControl, strError))
+        return false;
+
+    return true;
+}
+
+PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout) : m_txin(txin)
+{
+    //Extract the pubkeyhash from the keyimage
+    const std::vector<uint8_t> vKeyImages = txin.scriptData.stack[0];
+    uint32_t nInputs, nRingSize;
+    txin.GetAnonInfo(nInputs, nRingSize);
+    const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[0]); //todo: have check that there is only one keyimage in a stake tx, should occur before this constructor, or else move the loading of the key image to not be in constructor
+    m_hashPubKey = ki.GetHash();
+
+    int nExp = 0;
+    int nMantissa = 0;
+    CAmount nMinValue = 0;
+    CAmount nMaxValue = 0;
+    GetRangeProofInfo(pout->vRangeproof, nExp, nMantissa, nMinValue, nMaxValue);
+    m_nMinimumValue = nMinValue;
+
+    m_type = STAKE_RINGCT;
 }
