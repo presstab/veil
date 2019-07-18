@@ -4,6 +4,7 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <tinyformat.h>
+#include <secp256k1/include/secp256k1_mlsag.h>
 #include "veil/zerocoin/accumulators.h"
 #include "veil/zerocoin/mintmeta.h"
 #include "chain.h"
@@ -15,6 +16,7 @@
 #include "veil/ringct/blind.h"
 #ifdef ENABLE_WALLET
 #include "wallet/wallet.h"
+#include "veil/ringct/anonwallet.h"
 #endif
 
 typedef std::vector<unsigned char> valtype;
@@ -214,28 +216,47 @@ uint256 ZerocoinStake::GetSerialStakeHash()
     return hashSerial;
 }
 
-RingCtStakeCandidate::RingCtStakeCandidate(const CTransactionRecord& txrecord, const COutputRecord* pout) : m_txrecord(txrecord), m_pout(pout)
+RingCtStakeCandidate::RingCtStakeCandidate(CWallet* pwallet, const CTransactionRecord& txrecord, const COutputRecord* pout) : m_txrecord(txrecord), m_pout(pout)
 {
 
+    //Lookup key image
+    CCmpPubKey keyimage;
+
+
+    AnonWallet* panonwallet = pwallet->GetAnonWallet();
+//    AnonWalletDB wdb(pwallet->GetDBHandle());
+//    wdb.ReadAnonKeyImage(keyimage, m_outpoint, )
+
+    //Need to add outpoint to sig
+    //m_outpoint = outpoint;
+
+
+    if (!m_pout->GetKeyImage(keyimage)) {
+        CKeyID idStealth;
+        if (!m_pout->GetStealthID(idStealth)) {
+            error("%s:%d FAILED TO GET STEALTH ID FOR RCTCANDIDATE\n", __func__, __LINE__);
+            throw std::runtime_error("rct candidate failed.");
+        }
+
+
+        CKey keyStealth;
+        if (!panonwallet->GetKey(idStealth, keyStealth))
+            throw std::runtime_error("RingCtStakeCandidate failed to get stealth key");
+
+        CTxOutRingCT* txout = (CTxOutRingCT*)m_tx->vpout[m_outpoint.n].get();
+        secp256k1_get_keyimage(secp256k1_ctx_blind, keyimage.ncbegin(), txout->pk.begin(), keyStealth.begin());
+
+
+
+    }
 }
 
 // Uniqueness is the key image associated with this input
 CDataStream RingCtStakeCandidate::GetUniqueness()
 {
     CDataStream ss(0,0);
-
-    //Lookup key image
-    CCmpPubKey keyimage;
-    if (!m_pout->GetKeyImage(keyimage)) {
-        CKeyID idStealth;
-        if (!m_pout->GetStealthID(idStealth)) {
-            error("%s:%d FAILED TO GET STEALTH ID FOR RCTCANDIDATE\n", __func__, __LINE__);
-            return ss;
-        }
-    }
-
-
-
+    ss << m_hashPubKey;
+    return ss;
 }
 
 PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout) : m_txin(txin)

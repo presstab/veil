@@ -90,11 +90,13 @@ public:
 class RingCtStakeCandidate : public StakeInput
 {
 private:
-    const CTransactionRecord& m_txrecord;
+    CTransactionRef m_tx;
     const COutputRecord* m_pout;
+    COutPoint m_outpoint;
+    uint256 m_hashPubKey;
 
 public:
-    RingCtStakeCandidate(const CTransactionRecord& txrecord, const COutputRecord* pout);
+    RingCtStakeCandidate(CWallet* pwallet, const CTransactionRecord& txrecord, const COutputRecord* pout);
 
     bool IsZerocoins() override { return false; }
     CBlockIndex* GetIndexFrom() override { return nullptr; }
