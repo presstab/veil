@@ -50,6 +50,8 @@ public:
     bool fSafe;
     bool fMature;
     bool fNeedHardwareKey;
+
+    COutPoint GetOutpoint() const { return COutPoint(txhash, i); }
 };
 
 

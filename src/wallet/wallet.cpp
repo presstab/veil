@@ -3906,8 +3906,13 @@ bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<StakeInput> >& listInpu
         if (pout->GetAmount() < Params().MinimumStakeQuantity())
             continue;
 
+        CTransactionRef ptx;
+        uint256 hashblock;
+        if (!GetTransaction(rctOut.txhash, ptx, Params().GetConsensus(), hashblock, true))
+            continue;
+
         //Create stake input and add to list of stakable inputs
-        std::unique_ptr<StakeInput> input(new RingCtStakeCandidate(txrecord, pout));
+        std::unique_ptr<StakeInput> input(new RingCtStakeCandidate(this, ptx, rctOut.GetOutpoint(), pout));
         listInputs.emplace_back(std::move(input));
     }
 

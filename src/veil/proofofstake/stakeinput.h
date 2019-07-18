@@ -94,15 +94,16 @@ private:
     const COutputRecord* m_pout;
     COutPoint m_outpoint;
     uint256 m_hashPubKey;
+    CAmount m_nAmount;
 
 public:
-    RingCtStakeCandidate(CWallet* pwallet, const CTransactionRecord& txrecord, const COutputRecord* pout);
+    RingCtStakeCandidate(CWallet* pwallet, CTransactionRef ptx, const COutPoint& outpoint, const COutputRecord* pout);
 
     bool IsZerocoins() override { return false; }
     CBlockIndex* GetIndexFrom() override { return nullptr; }
     bool CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 hashTxOut = uint256()) { return false; }
     bool GetTxFrom(CTransaction& tx) { return false; }
-    CAmount GetValue() override;
+    CAmount GetValue() override { return m_nAmount; }
     bool CreateTxOuts(CWallet* pwallet, std::vector<CTxOut>& vout, CAmount nTotal) override { return false; }
     bool GetModifier(uint64_t& nStakeModifier) override { return false; }
     CDataStream GetUniqueness() override;

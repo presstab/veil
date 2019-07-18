@@ -216,39 +216,37 @@ uint256 ZerocoinStake::GetSerialStakeHash()
     return hashSerial;
 }
 
-RingCtStakeCandidate::RingCtStakeCandidate(CWallet* pwallet, const CTransactionRecord& txrecord, const COutputRecord* pout) : m_txrecord(txrecord), m_pout(pout)
+RingCtStakeCandidate::RingCtStakeCandidate(CWallet* pwallet, CTransactionRef ptx, const COutPoint& outpoint, const COutputRecord* pout) : m_outpoint(outpoint), m_pout(pout)
 {
-
-    //Lookup key image
-    CCmpPubKey keyimage;
-
+    m_tx = ptx;
 
     AnonWallet* panonwallet = pwallet->GetAnonWallet();
-//    AnonWalletDB wdb(pwallet->GetDBHandle());
-//    wdb.ReadAnonKeyImage(keyimage, m_outpoint, )
+    AnonWalletDB wdb(pwallet->GetDBHandle());
 
-    //Need to add outpoint to sig
-    //m_outpoint = outpoint;
-
-
-    if (!m_pout->GetKeyImage(keyimage)) {
+    //Get key image
+    CCmpPubKey keyimage;
+    if (!wdb.GetKeyImageFromOutpoint(m_outpoint, keyimage)) {
+        //Manually get the key image if possible.
         CKeyID idStealth;
         if (!m_pout->GetStealthID(idStealth)) {
             error("%s:%d FAILED TO GET STEALTH ID FOR RCTCANDIDATE\n", __func__, __LINE__);
             throw std::runtime_error("rct candidate failed.");
         }
 
-
         CKey keyStealth;
         if (!panonwallet->GetKey(idStealth, keyStealth))
             throw std::runtime_error("RingCtStakeCandidate failed to get stealth key");
 
         CTxOutRingCT* txout = (CTxOutRingCT*)m_tx->vpout[m_outpoint.n].get();
-        secp256k1_get_keyimage(secp256k1_ctx_blind, keyimage.ncbegin(), txout->pk.begin(), keyStealth.begin());
+        if (secp256k1_get_keyimage(secp256k1_ctx_blind, keyimage.ncbegin(), txout->pk.begin(), keyStealth.begin()) != 0)
+            throw std::runtime_error("Unable to get key image");
 
-
-
+        if (!wdb.WriteKeyImageFromOutpoint(m_outpoint, keyimage))
+            error("%s: failed to write keyimage to disk.");
     }
+
+    m_hashPubKey = keyimage.GetHash();
+    m_nAmount = m_pout->GetAmount();
 }
 
 // Uniqueness is the key image associated with this input
