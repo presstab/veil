@@ -257,6 +257,14 @@ CDataStream RingCtStakeCandidate::GetUniqueness()
     return ss;
 }
 
+
+//Indexfrom is the same for all rct candidates and is based on the current index minus a certain amount of blocks
+CBlockIndex* RingCtStakeCandidate::GetIndexFrom()
+{
+    int nCurrentHeight = chainActive.Height();
+    return chainActive.Tip()->GetAncestor(nCurrentHeight + 1 - Params().Zerocoin_RequiredStakeDepth());
+}
+
 PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout) : m_txin(txin)
 {
     //Extract the pubkeyhash from the keyimage

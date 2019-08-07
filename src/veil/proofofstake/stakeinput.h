@@ -100,7 +100,7 @@ public:
     RingCtStakeCandidate(CWallet* pwallet, CTransactionRef ptx, const COutPoint& outpoint, const COutputRecord* pout);
 
     bool IsZerocoins() override { return false; }
-    CBlockIndex* GetIndexFrom() override { return nullptr; }
+    CBlockIndex* GetIndexFrom() override;
     bool CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 hashTxOut = uint256()) { return false; }
     bool GetTxFrom(CTransaction& tx) { return false; }
     CAmount GetValue() override { return m_nAmount; }
