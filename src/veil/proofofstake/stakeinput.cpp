@@ -30,7 +30,11 @@ ZerocoinStake::ZerocoinStake(const libzerocoin::CoinSpend& spend)
 
 int ZerocoinStake::GetChecksumHeightFromMint()
 {
-    int nHeightChecksum = chainActive.Height() + 1 - Params().Zerocoin_RequiredStakeDepth();
+    int nRequiredDepth = Params().Zerocoin_RequiredStakeDepth();
+    if (chainActive.Height() + 1 >= Params().HeightModulusV2()) //need +1 since this will create a new block 1 beyond tip
+        nRequiredDepth = Params().Zerocoin_RequiredStakeDepthV2();
+
+    int nHeightChecksum = chainActive.Height() + 1 - nRequiredDepth;
     //Need to return the first occurance of this checksum in order for the validation process to identify a specific
     //block height
     uint256 nChecksum;
@@ -81,7 +85,15 @@ CAmount ZerocoinStake::GetValue()
 int ZerocoinStake::HeightToModifierHeight(int nHeight)
 {
     //Nearest multiple of KernelModulus that is over KernelModulus bocks deep in the chain
-    return (nHeight - Params().KernelModulus()) - (nHeight % Params().KernelModulus()) ;
+    int nRemainder = nHeight % Params().KernelModulus();
+    if (nHeight >= Params().HeightModulusV2()) {
+        //Add kernel modulus spacing to the height that is being staked (nHeight)
+        //For example, a stake comes from block 299, the result would come back as 400. This is a block far enough
+        //in the future to not be grindable.
+        return (nHeight + Params().KernelModulusSpacing() - nRemainder);
+    }
+
+    return (nHeight - Params().KernelModulus()) - nRemainder ;
 }
 
 //Use the first accumulator checkpoint that occurs 60 minutes after the block being staked from

@@ -289,6 +289,7 @@ public:
         strNetworkRewardAddress = "3AxxVeiLxxxxVeiLxxxxVeiLxxxwy7FAkd";
         nMaxPoWBlocks = 5;
         nConsecutivePoWHeight = 15000;
+        nHeightModulusV2 = 320000;
 
         /** Zerocoin */
         zerocoinModulus = "25195908475657893494027183240048398571429282126204032027777137836043662020707595556264018525880784"
@@ -303,8 +304,10 @@ public:
         nRequiredAccumulation = 1;
         nDefaultSecurityLevel = 100; //full security level for accumulators
         nZerocoinRequiredStakeDepth = 200; //The required confirmations for a zerocoin to be stakable
+        nZerocoinRequiredStakeDepthV2 = 400;
         nHeightPoSStart = 1500;
         nKernelModulus = 100;
+        nKernelModulusSpacing = 200;
         nCoinbaseMaturity = 100;
         nProofOfFullNodeRounds = 4;
         nLastPOWBlock = 2000000;

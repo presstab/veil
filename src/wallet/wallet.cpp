@@ -3204,13 +3204,17 @@ bool CWallet::MintableCoins()
     LOCK(cs_main);
     CAmount nZBalance = GetZerocoinBalance(false);
 
+    int nRequiredDepth = Params().Zerocoin_RequiredStakeDepth();
+    if (chainActive.Height() + 1 >= Params().HeightModulusV2())
+        nRequiredDepth = Params().Zerocoin_RequiredStakeDepthV2();
+
     // zero coin
     if (nZBalance > 0) {
         std::set<CMintMeta> setMints = zTracker->ListMints(true, true, true);
         for (auto mint : setMints) {
             if (mint.nVersion < CZerocoinMint::STAKABLE_VERSION)
                 continue;
-            if (mint.nHeight > chainActive.Height() - Params().Zerocoin_RequiredStakeDepth())
+            if (mint.nHeight > chainActive.Height() - nRequiredDepth)
                 continue;
             return true;
         }
@@ -3879,7 +3883,11 @@ bool CWallet::SelectStakeCoins(std::list<std::unique_ptr<ZerocoinStake> >& listI
         }
         if (meta.nVersion < CZerocoinMint::STAKABLE_VERSION)
             continue;
-        if (meta.nHeight < chainActive.Height() - Params().Zerocoin_RequiredStakeDepth()) {
+        int nDepthRequired = Params().Zerocoin_RequiredStakeDepth();
+        if (chainActive.Height() >= Params().HeightModulusV2())
+            nDepthRequired = Params().Zerocoin_RequiredStakeDepthV2();
+
+        if (meta.nHeight < chainActive.Height() - nDepthRequired) {
             std::unique_ptr<ZerocoinStake> input(new ZerocoinStake(meta.denom, meta.hashStake));
             listInputs.emplace_back(std::move(input));
         }
@@ -6650,7 +6658,7 @@ void CWallet::PrecomputeSpends()
     bool fLoadedDB = false;
     int64_t nLastCacheCleanUpTime = GetTime();
     int64_t nLastCacheWriteDB = nLastCacheCleanUpTime;
-    int nRequiredStakeDepthBuffer = Params().Zerocoin_RequiredStakeDepth() + 10;
+    int nRequiredStakeDepthBuffer = Params().Zerocoin_RequiredStakeDepthV2() + 10;
 
     while (true) {
         boost::this_thread::interruption_point();

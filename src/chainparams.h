@@ -121,6 +121,7 @@ public:
     int Zerocoin_RequiredAccumulation() const { return nRequiredAccumulation; }
     int Zerocoin_DefaultSpendSecurity() const { return nDefaultSecurityLevel; }
     int Zerocoin_RequiredStakeDepth() const { return nZerocoinRequiredStakeDepth; }
+    int Zerocoin_RequiredStakeDepthV2() const { return nZerocoinRequiredStakeDepthV2; }
 
     /** RingCT and Stealth **/
     int DefaultRingSize() const { return nDefaultRingSize; }
@@ -129,6 +130,7 @@ public:
     int LAST_POW_BLOCK() const { return nLastPOWBlock; }
     int HeightPoSStart() const { return nHeightPoSStart; }
     int KernelModulus() const { return nKernelModulus; }
+    int KernelModulusSpacing() const { return nKernelModulusSpacing; }
     int CoinbaseMaturity() const { return nCoinbaseMaturity; }
     int HeightSupplyCreationStop() const { return nHeightSupplyCreationStop; }
     int ProofOfFullNodeRounds() const {return nProofOfFullNodeRounds; }
@@ -136,6 +138,7 @@ public:
     int HeightProtocolBumpEnforcement() const { return nHeightProtocolBumpEnforcement; }
     int MaxHeaderRequestWithoutPoW() const { return nMaxHeaderRequestWithoutPoW; }
     int BIP9Period() const { return consensus.nMinerConfirmationWindow; }
+    int HeightModulusV2() const { return nHeightModulusV2; }
 
 protected:
     CChainParams() {}
@@ -180,8 +183,10 @@ protected:
     //Proof of Stake/Consensus
     int64_t nBudget_Fee_Confirmations;
     int nZerocoinRequiredStakeDepth;
+    int nZerocoinRequiredStakeDepthV2;
     int nHeightPoSStart;
     int nKernelModulus;
+    int nKernelModulusSpacing;
     int nLastPOWBlock;
     int nCoinbaseMaturity;
     int nProofOfFullNodeRounds;
@@ -190,6 +195,7 @@ protected:
     //Time and height enforcements
     int nTimeEnforceWeightReduction;
     int nHeightProtocolBumpEnforcement; // the height a new protobump is enforced
+    int nHeightModulusV2;
 
     //Settings that are not chain critical, but should not be edited unless the person changing understands the consequence
     int nMaxHeaderRequestWithoutPoW;

@@ -4424,12 +4424,17 @@ bool CChainState::ContextualCheckZerocoinStake(CBlockIndex* pindex, CStakeInput*
         if (!pindexFrom)
             return error("%s: failed to get index associated with zerocoin stake checksum", __func__);
 
-        if (pindex->nHeight - pindexFrom->nHeight < Params().Zerocoin_RequiredStakeDepth())
+        //Staking depth requirements changed with the v2 modulus
+        int nDepthRequired = Params().Zerocoin_RequiredStakeDepth();
+        if (pindex->nHeight >= Params().HeightModulusV2())
+            nDepthRequired = Params().Zerocoin_RequiredStakeDepthV2();
+
+        if (pindex->nHeight - pindexFrom->nHeight < nDepthRequired)
             return error("%s: zerocoin stake does not have required confirmation depth", __func__);
 
         //The checksum needs to be the exact checksum from the modifier height
         libzerocoin::CoinDenomination denom = libzerocoin::AmountToZerocoinDenomination(stakeCheck->GetValue());
-        int nHeightStake = pindex->nHeight - Params().Zerocoin_RequiredStakeDepth();
+        int nHeightStake = pindex->nHeight - nDepthRequired;
         CBlockIndex* pindexFrom2 = pindex->GetAncestor(nHeightStake);
         if (!pindexFrom2)
             return error("%s: block ancestor does not exist", __func__);
