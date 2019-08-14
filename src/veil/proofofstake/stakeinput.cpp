@@ -115,7 +115,13 @@ bool ZerocoinStake::GetModifier(uint64_t& nStakeModifier)
         pindex = pindex->pprev;
     }
 
-    nStakeModifier = UintToArith256(pindex->mapAccumulatorHashes[denom]).GetLow64();
+    if (nNearest100Block >= Params().HeightModulusV2()) {
+        //Use Veil data hash which has more uniqueness than an accumulator hash which may or may not be updated frequently
+        nStakeModifier = UintToArith256(pindex->hashVeilData).GetLow64();
+    } else {
+        nStakeModifier = UintToArith256(pindex->mapAccumulatorHashes[denom]).GetLow64();
+    }
+
     return true;
 }
 

@@ -113,6 +113,47 @@ BOOST_AUTO_TEST_CASE(checkzerocoinmint_test)
 //    BOOST_CHECK(fFoundMint);
 }
 
+BOOST_AUTO_TEST_CASE(test_zerocoinstake)
+{
+    SelectParams(CBaseChainParams::MAIN);
+    auto denom = CoinDenomination::ZQ_TEN;
+    CBlockIndex* pindexPrev;
+    for (unsigned int i = 0; i < 1000; i++) {
+        CBlockIndex* pindex = new CBlockIndex();
+        pindex->nHeight = i;
+        if (i)
+            pindex->pprev = pindexPrev;
+        pindex->mapAccumulatorHashes[denom] = GetRandHash();
+
+        chainActive.SetTip(pindex);
+        pindexPrev = pindex;
+    }
+
+    PrivateCoin mint(Params().Zerocoin_Params(), denom, true);
+    PublicCoin pubcoin = mint.getPublicCoin();
+
+    uint256 hashStake = mint.getSerialNumber().getuint256();
+    hashStake = Hash(hashStake.begin(), hashStake.end());
+    ZerocoinStake stake(pubcoin.getDenomination(), hashStake);
+
+    auto pindexStakeDepth = stake.GetIndexFrom();
+    int nHeightCheck = chainActive.Height() + 1 - Params().Zerocoin_RequiredStakeDepth();
+    nHeightCheck -= (nHeightCheck % 100);
+    BOOST_CHECK_MESSAGE(pindexStakeDepth->nHeight == nHeightCheck, "wrong height for index from on mint");
+
+    int nHeightModifier = stake.HeightToModifierHeight(pindexStakeDepth->nHeight);
+    std::cout << "modifier height: " << nHeightModifier << " stakedepthheight: " << pindexStakeDepth->nHeight <<
+    " chainheight: " << chainActive.Height()  << " heightcheck: " << nHeightCheck << std::endl;
+
+    //Check that modifier is equal to the acc hash from the index 100 before (version 1 style)
+    uint64_t nModifier;
+    stake.GetModifier(nModifier);
+    uint256 hashAcc = chainActive[nHeightModifier]->mapAccumulatorHashes.at(denom);
+    BOOST_CHECK_MESSAGE(nModifier == UintToArith256(hashAcc).GetLow64(), "V1 modifier is not correct");
+
+
+}
+
 bool CheckZerocoinSpendNoDB(const CTransaction tx, string& strError)
 {
     //max needed non-mint outputs should be 2 - one for redemption address and a possible 2nd for change
@@ -635,7 +676,6 @@ BOOST_AUTO_TEST_CASE(test_coinspendv4)
 
     BOOST_CHECK_MESSAGE(!threw, "Deserialization error with version 4 CoinSpend object");
 }
-
 
 
 BOOST_AUTO_TEST_SUITE_END()
