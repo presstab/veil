@@ -101,7 +101,7 @@ public:
 
     bool IsZerocoins() override { return false; }
     CBlockIndex* GetIndexFrom() override;
-    bool CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 hashTxOut = uint256()) { return false; }
+    bool CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 hashTxOut = uint256());
     bool GetTxFrom(CTransaction& tx) { return false; }
     CAmount GetValue() override { return m_nAmount; }
     bool CreateTxOuts(CWallet* pwallet, std::vector<CTxOut>& vout, CAmount nTotal) override { return false; }

@@ -5,6 +5,7 @@
 
 #include <tinyformat.h>
 #include <secp256k1/include/secp256k1_mlsag.h>
+#include <wallet/coincontrol.h>
 #include "veil/zerocoin/accumulators.h"
 #include "veil/zerocoin/mintmeta.h"
 #include "chain.h"
@@ -263,6 +264,39 @@ CBlockIndex* RingCtStakeCandidate::GetIndexFrom()
 {
     int nCurrentHeight = chainActive.Height();
     return chainActive.Tip()->GetAncestor(nCurrentHeight + 1 - Params().Zerocoin_RequiredStakeDepth());
+}
+
+bool RingCtStakeCandidate::CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 hashTxOut)
+{
+    AnonWallet* panonWallet = pwallet->GetAnonWallet();
+    CTransactionRef ptx = MakeTransactionRef();
+    CWalletTx wtx(pwallet, ptx);
+
+    //Add the input to coincontrol so that addanoninputs knows what to use
+    CCoinControl coinControl;
+    coinControl.Select(m_outpoint, m_nAmount);
+    coinControl.nCoinType = OUTPUT_RINGCT;
+
+    //Tell the rct code who the recipient is
+    std::vector<CTempRecipient> vecSend;
+    CTempRecipient tempRecipient;
+    tempRecipient.nType = OUTPUT_RINGCT;
+    tempRecipient.SetAmount(m_nAmount);
+    CStealthAddress address;
+    if (!panonWallet->GetStakeAddress(address))
+        return false;
+    tempRecipient.address = address;
+    tempRecipient.fSubtractFeeFromAmount = false;
+    tempRecipient.fExemptFeeSub = true;
+    vecSend.emplace_back(tempRecipient);
+
+    std::string strError;
+    CTransactionRecord rtx;
+    CAmount nFeeRet = 0;
+    if (0 != panonWallet->AddAnonInputs(wtx, rtx, vecSend, /*fSign*/false, /*nRingSize*/Params().DefaultRingSize(), /*nInputsPerSig*/32, nFeeRet, &coinControl, strError))
+        return false;
+
+    return true;
 }
 
 PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout) : m_txin(txin)
