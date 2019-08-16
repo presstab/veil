@@ -23,6 +23,8 @@
 #include "consensus/tx_verify.h"
 #include "validation.h"
 #include <core_io.h>
+#include <tinyformat.h>
+#include <veil/proofofstake/stakeinput.h>
 
 using namespace libzerocoin;
 
@@ -116,14 +118,22 @@ BOOST_AUTO_TEST_CASE(checkzerocoinmint_test)
 BOOST_AUTO_TEST_CASE(test_zerocoinstake)
 {
     SelectParams(CBaseChainParams::MAIN);
+
+    FastRandomContext rng;
     auto denom = CoinDenomination::ZQ_TEN;
     CBlockIndex* pindexPrev;
     for (unsigned int i = 0; i < 1000; i++) {
         CBlockIndex* pindex = new CBlockIndex();
         pindex->nHeight = i;
-        if (i)
+        if (i) {
             pindex->pprev = pindexPrev;
-        pindex->mapAccumulatorHashes[denom] = GetRandHash();
+        }
+
+        //acc hashes only change on a block height that is a multiple of 10
+        if (pindexPrev && pindex->nHeight % 10 != 0)
+            pindex->mapAccumulatorHashes[denom] = pindexPrev->mapAccumulatorHashes[denom];
+        else
+            pindex->mapAccumulatorHashes[denom] = rng.rand256();
 
         chainActive.SetTip(pindex);
         pindexPrev = pindex;
@@ -141,17 +151,88 @@ BOOST_AUTO_TEST_CASE(test_zerocoinstake)
     nHeightCheck -= (nHeightCheck % 100);
     BOOST_CHECK_MESSAGE(pindexStakeDepth->nHeight == nHeightCheck, "wrong height for index from on mint");
 
-    int nHeightModifier = stake.HeightToModifierHeight(pindexStakeDepth->nHeight);
+    int nHeightModifier = stake.HeightToModifierHeight(chainActive.Height() + 1, pindexStakeDepth->nHeight);
     std::cout << "modifier height: " << nHeightModifier << " stakedepthheight: " << pindexStakeDepth->nHeight <<
     " chainheight: " << chainActive.Height()  << " heightcheck: " << nHeightCheck << std::endl;
 
     //Check that modifier is equal to the acc hash from the index 100 before (version 1 style)
     uint64_t nModifier;
-    stake.GetModifier(nModifier);
+    stake.GetModifier(chainActive.Height() + 1, nModifier);
     uint256 hashAcc = chainActive[nHeightModifier]->mapAccumulatorHashes.at(denom);
     BOOST_CHECK_MESSAGE(nModifier == UintToArith256(hashAcc).GetLow64(), "V1 modifier is not correct");
 
 
+
+    // Add more blocks up to the point that new modifier will be active
+    for (auto i = chainActive.Height() + 1; i < Params().HeightModulusV2() + 100; i++) {
+        CBlockIndex* pindex = new CBlockIndex();
+        pindex->pprev = pindexPrev;
+        pindex->nHeight = i;
+
+        if (pindex->nHeight % 10 == 0)
+            pindex->mapAccumulatorHashes[denom] = rng.rand256();
+        else
+            pindex->mapAccumulatorHashes[denom] = pindexPrev->mapAccumulatorHashes[denom];
+
+        pindex->hashVeilData = rng.rand256();
+
+        //! Test block before activation of new modulus
+        if (chainActive.Height() == Params().HeightModulusV2() - 2) {
+            int nHeightBeingStaked = chainActive.Height() + 1;
+
+            //before the modifier change, should have old version of calculating the modifier
+            pindexStakeDepth = stake.GetIndexFrom();
+            BOOST_CHECK_MESSAGE(pindexStakeDepth != nullptr, "stake index from is null");
+
+            //Check the stake height is less than the required depth
+            nHeightCheck = nHeightBeingStaked - Params().Zerocoin_RequiredStakeDepth();
+            nHeightCheck -= (nHeightCheck % 10);
+            BOOST_CHECK_MESSAGE(pindexStakeDepth->nHeight == nHeightCheck, strprintf("stake depth is not correct before transition block (block %d). expected=%s actual=%d", nHeightBeingStaked, nHeightCheck, pindexStakeDepth->nHeight));
+
+            //Check the modifier height
+            nHeightModifier = stake.HeightToModifierHeight(nHeightBeingStaked, pindexStakeDepth->nHeight);
+            nHeightCheck = (pindexStakeDepth->nHeight - Params().KernelModulus()) - (pindexStakeDepth->nHeight % Params().KernelModulus());
+            BOOST_CHECK_MESSAGE(nHeightModifier == nHeightCheck, strprintf("modifier height is incorrect before transition (block %d). expected:%d actual:%d", nHeightBeingStaked, nHeightCheck, nHeightModifier));
+
+            //Check the resulting modifier
+            stake.GetModifier(nHeightBeingStaked, nModifier);
+            uint256 hashAcc = chainActive[nHeightModifier]->mapAccumulatorHashes.at(denom);
+            uint64_t nModifierCheck = UintToArith256(hashAcc).GetLow64();
+            BOOST_CHECK_MESSAGE(nModifier == nModifierCheck, "modifier is not what is expected before transition block");
+        }
+
+        //! Test block when activation of modulus occurs
+        if (chainActive.Height() == Params().HeightModulusV2() - 1) {
+            int nHeightBeingStaked = chainActive.Height() + 1;
+
+            //before the modifier change, should have old version of calculating the modifier
+            pindexStakeDepth = stake.GetIndexFrom();
+            BOOST_CHECK_MESSAGE(pindexStakeDepth != nullptr, "stake index from is null");
+
+            //Check the stake height is less than the required depth
+            nHeightCheck = nHeightBeingStaked - Params().Zerocoin_RequiredStakeDepthV2();
+            nHeightCheck -= (nHeightCheck % 10);
+            BOOST_CHECK_MESSAGE(pindexStakeDepth->nHeight == nHeightCheck, strprintf("stake depth is not correct on transition block (block %d). expected=%s actual=%d", nHeightBeingStaked, nHeightCheck, pindexStakeDepth->nHeight));
+
+            //Check the modifier height
+            nHeightModifier = stake.HeightToModifierHeight(nHeightBeingStaked, pindexStakeDepth->nHeight);
+            nHeightCheck = nHeightBeingStaked - Params().Zerocoin_RequiredStakeDepthV2() + Params().KernelModulusSpacing();
+            BOOST_CHECK_MESSAGE(nHeightModifier == nHeightCheck, strprintf("modifier height is incorrect on transition (block %d). expected:%d actual:%d", nHeightBeingStaked, nHeightCheck, nHeightModifier));
+
+            //Check the resulting modifier
+            stake.GetModifier(nHeightBeingStaked, nModifier);
+            uint256 hashVeilData = chainActive[nHeightModifier]->hashVeilData;
+            uint64_t nModifierCheck = UintToArith256(hashVeilData).GetLow64();
+            uint256 hashAcc = chainActive[nHeightModifier]->mapAccumulatorHashes[denom];
+            uint64_t nModifierOld = UintToArith256(hashAcc).GetLow64();
+
+            BOOST_CHECK_MESSAGE(nModifier == nModifierCheck, strprintf("Modifier is not what is expected on transition block. Using old modifier:%d", nModifier == nModifierOld));
+        }
+
+        chainActive.SetTip(pindex);
+        pindexPrev = pindex;
+        //std::cout << "height: " << chainActive.Height() << "\n";
+    }
 }
 
 bool CheckZerocoinSpendNoDB(const CTransaction tx, string& strError)
@@ -252,430 +333,430 @@ bool CheckZerocoinSpendNoDB(const CTransaction tx, string& strError)
     return fValidated;
 }
 
-BOOST_AUTO_TEST_CASE(checkzerocoinspend_test)
-{
-    CBigNum bnTrustedModulus = 0;
-    if (!bnTrustedModulus)
-        bnTrustedModulus.SetDec(zerocoinModulus);
-    libzerocoin::ZerocoinParams zerocoinParams = libzerocoin::ZerocoinParams(bnTrustedModulus);
-
-    cout << "Running check_zerocoinspend_test...\n";
-
-    libzerocoin::PrivateCoin coin(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-    PublicCoin pubCoin = coin.getPublicCoin();
-    BOOST_CHECK_MESSAGE(pubCoin.validate(), "Failed to validate pubCoin created from hex string");
-
-    //initialize and Accumulator and AccumulatorWitness
-    Accumulator accumulator(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
-    AccumulatorWitness witness(Params().Zerocoin_Params(), accumulator, pubCoin);
-    accumulator += pubCoin;
-
-    std::vector<libzerocoin::PublicCoin> vPubcoins;
-    for (unsigned int i = 0; i < 10; i++) {
-        PrivateCoin c(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-        vPubcoins.emplace_back(c.getPublicCoin());
-    }
-
-    //populate the witness and accumulators
-    for(const auto& pubcoin : vPubcoins) {
-        accumulator += pubcoin;
-        witness += pubcoin;
-    }
-
-    //Get the checksum of the accumulator we use for the spend and also add it to our checksum map
-    auto hashChecksum = GetChecksum(accumulator.getValue());
-    CoinSpend* pspend = nullptr;
-    try {
-        pspend = new CoinSpend(Params().Zerocoin_Params(), coin, accumulator, hashChecksum, witness, uint256(), SpendType::SPEND);
-    } catch (...) {
-        BOOST_CHECK_MESSAGE(false, "Coinspend threw runtime error on creation");
-    }
-
-    CDataStream serializedCoinSpend2(SER_NETWORK, PROTOCOL_VERSION);
-    bool fSerialize = false;
-    if (pspend) {
-        cout << pspend->ToString() << endl;
-        std::string strError;
-        BOOST_CHECK_MESSAGE(pspend->Verify(accumulator, strError, true),
-                            "Coinspend construction failed to create valid proof");
-
-        CBigNum serial = pspend->getCoinSerialNumber();
-        BOOST_CHECK_MESSAGE(serial, "Serial Number can't be 0");
-
-        CoinDenomination denom = pspend->getDenomination();
-        BOOST_CHECK_MESSAGE(denom == pubCoin.getDenomination(), "Spend denomination must match original pubCoin");
-        BOOST_CHECK_MESSAGE(pspend->Verify(accumulator, strError, true), "CoinSpend object failed to validate");
-
-        //serialize the spend
-        try {
-            fSerialize = true;
-            serializedCoinSpend2 << *pspend;
-        } catch (...) {
-            fSerialize = false;
-        }
-    }
-    BOOST_CHECK_MESSAGE(fSerialize, "failed to serialize coinspend object");
-
-    std::vector<unsigned char> data(serializedCoinSpend2.begin(), serializedCoinSpend2.end());
-
-    /** Check valid spend */
-
-    CTxIn newTxIn;
-    newTxIn.nSequence = 1;
-    newTxIn.scriptSig = CScript() << OP_ZEROCOINSPEND << data.size();
-    newTxIn.scriptSig.insert(newTxIn.scriptSig.end(), data.begin(), data.end());
-    newTxIn.prevout.SetNull();
-
-    // Deserialize the CoinSpend intro a fresh object
-    std::vector<char, zero_after_free_allocator<char> > dataTxIn;
-    dataTxIn.insert(dataTxIn.end(), newTxIn.scriptSig.begin() + 4, newTxIn.scriptSig.end());
-
-    CDataStream serializedCoinSpend(dataTxIn, SER_NETWORK, PROTOCOL_VERSION);
-    //old params for the V1 generated coin, new params for the accumulator. Emulates main-net transition.
-    CoinSpend spend1(Params().Zerocoin_Params(), serializedCoinSpend);
-    std::string strError;
-    BOOST_CHECK_MESSAGE(spend1.Verify(accumulator, strError, true), "Failed deserialized check of CoinSpend");
-
-    CScript script;
-    CTxOut txOut(1 * COIN, script);
-
-    CMutableTransaction txNew;
-    txNew.vin.push_back(newTxIn);
-    txNew.vpout.push_back(txOut.GetSharedPtr());
-
-    CTransaction txMintFrom;
-    //BOOST_CHECK_MESSAGE(DecodeHexTx(txMintFrom, rawTx1), "Failed to deserialize hex transaction");
-    if (!CheckZerocoinSpendNoDB(txNew, strError)) {
-        BOOST_CHECK_MESSAGE(false, "checkzerocoinspend failed");
-    }
-
-    /**check an overspend*/
-
-    CTxOut txOutOverSpend(100 * COIN, script);
-    CMutableTransaction txOverSpend;
-    txOverSpend.vin.push_back(newTxIn);
-    txOverSpend.vpout.push_back(txOutOverSpend.GetSharedPtr());
-    strError = "";
-    CheckZerocoinSpendNoDB(txOverSpend, strError);
-    string str = "Failed to detect overspend. Error Message: " + strError;
-    BOOST_CHECK_MESSAGE(strError == "Transaction spend more than was redeemed in zerocoins", str);
-
-
-    cout << "checking v2 spend\n";
-
-    CMutableTransaction tx;
-    uint256 txHash;
-    CTxIn in(txHash, 0);
-    tx.vin.emplace_back(in);
-
-    // Create a New Zerocoin with specific denomination given by pubCoin
-    PublicCoin pubcoin_v2 = coin.getPublicCoin();
-
-    //initialize and Accumulator and AccumulatorWitness
-    Accumulator accumulator_v2(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
-    AccumulatorWitness witness_v2(Params().Zerocoin_Params(), accumulator_v2, pubcoin_v2);
-
-    //populate the witness and accumulators - with old v1 params
-    int64_t nTimeStart = GetTimeMillis();
-    for(int i = 0; i < 5; i++) {
-        PrivateCoin privTemp(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-        PublicCoin pubTemp = privTemp.getPublicCoin();
-        accumulator_v2 += pubTemp;
-        witness_v2 += pubTemp;
-    }
-    cout << (GetTimeMillis() - nTimeStart)/5 << "ms per mint\n";
-
-    accumulator_v2 += pubcoin_v2;
-
-    //Get the checksum of the accumulator we use for the spend and also add it to our checksum map
-//    auto hashChecksum_v2 = GetChecksum(accumulator_v2.getValue());
-//    uint256 ptxHash = CBigNum::randKBitBignum(256).getuint256();
-//    try {
-//        CoinSpend coinSpend_v2(Params().Zerocoin_Params(), coin, accumulator_v2, hashChecksum_v2, witness_v2,
-//                               ptxHash, SpendType::SPEND);
+//BOOST_AUTO_TEST_CASE(checkzerocoinspend_test)
+//{
+//    CBigNum bnTrustedModulus = 0;
+//    if (!bnTrustedModulus)
+//        bnTrustedModulus.SetDec(zerocoinModulus);
+//    libzerocoin::ZerocoinParams zerocoinParams = libzerocoin::ZerocoinParams(bnTrustedModulus);
 //
-//        BOOST_CHECK_MESSAGE(coinSpend_v2.HasValidSerial(Params().Zerocoin_Params()),
-//                            "coinspend_v2 does not have a valid serial");
-//        std::cout << "398\n";
-//        BOOST_CHECK_MESSAGE(coinSpend_v2.Verify(accumulator_v2, strError, false), "coinspend_v2 failed to verify");
-//        std::cout << "400\n";
-//        BOOST_CHECK_MESSAGE(coinSpend_v2.HasValidSignature(), "coinspend_v2 does not have valid signature");
-//        //BOOST_CHECK_MESSAGE(coinSpend_v2.getVersion() == 2, "coinspend_v2 version is wrong");
-//        std::cout << "403\n";
-//        BOOST_CHECK_MESSAGE(coinSpend_v2.getPubKey() == coin.getPubKey(), "pub keys do not match");
-//        std::cout << "405\n";
-//    } catch (...) {
-//        BOOST_CHECK_MESSAGE(false, "Runtime error when creating coinspend_v2");
+//    cout << "Running check_zerocoinspend_test...\n";
+//
+//    libzerocoin::PrivateCoin coin(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//    PublicCoin pubCoin = coin.getPublicCoin();
+//    BOOST_CHECK_MESSAGE(pubCoin.validate(), "Failed to validate pubCoin created from hex string");
+//
+//    //initialize and Accumulator and AccumulatorWitness
+//    Accumulator accumulator(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
+//    AccumulatorWitness witness(Params().Zerocoin_Params(), accumulator, pubCoin);
+//    accumulator += pubCoin;
+//
+//    std::vector<libzerocoin::PublicCoin> vPubcoins;
+//    for (unsigned int i = 0; i < 10; i++) {
+//        PrivateCoin c(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//        vPubcoins.emplace_back(c.getPublicCoin());
 //    }
-}
-
-BOOST_AUTO_TEST_CASE(setup_exceptions_test)
-{
-    CBigNum bnTrustedModulus = 0;
-    if (!bnTrustedModulus)
-        bnTrustedModulus.SetDec(zerocoinModulus);
-    libzerocoin::ZerocoinParams zerocoinParams = libzerocoin::ZerocoinParams(bnTrustedModulus);
-
-    cout << "Running check_unitialized parameters,etc for setup exceptions...\n";
-
-    CBigNum bnpubcoin;
-    BOOST_CHECK(bnpubcoin.SetHexBool(rawTxpub1));
-
-    // Check Modulus > 1023 Exception
-    try {
-        ZerocoinParams ZCParams(bnpubcoin);
-        BOOST_CHECK_MESSAGE(false, "Didn't catch exception:  ZerocoinException: Modulus must be at least 1023 bit");
-    }
-    catch (...) {
-        BOOST_CHECK_MESSAGE(true, "Caught exception: ZerocoinException: Modulus must be at least 1023 bit");
-    }
-
-    // Check Security Level < 80 Exception
-    try {
-        ZerocoinParams ZCParams(bnpubcoin,1);
-        BOOST_CHECK_MESSAGE(false, "Didn't catch exception:  Security Level >= 80");
-    }
-    catch (...) {
-        BOOST_CHECK_MESSAGE(true, "Caught exception: ZerocoinException: Security Level >= 80");
-    }
-
-    // Check unitialized params Exception for PublicCoin
-    try {
-        zerocoinParams.initialized = false;
-        PublicCoin pubCoin(&zerocoinParams);
-        BOOST_CHECK_MESSAGE(false, "Didn't catch exception checking for uninitialized Params");
-    }
-    catch (...) {
-        BOOST_CHECK_MESSAGE(true, "Caught exception checking for initalized Params");
-    }
-
-    // Check unitialized params Exception for PublicCoin (alternate constructor)
-    try {
-        zerocoinParams.initialized = false;
-        PublicCoin pubCoin(&zerocoinParams);
-        BOOST_CHECK_MESSAGE(false, "Didn't catch exception checking for uninitialized Params");
-    }
-    catch (...) {
-        BOOST_CHECK_MESSAGE(true, "Caught exception checking for initalized Params");
-    }
-
-    // Check unitialized params Exception for PrivateCoin
-    try {
-        zerocoinParams.initialized = false;
-        PrivateCoin privCoin(&zerocoinParams, CoinDenomination::ZQ_TEN);
-        BOOST_CHECK_MESSAGE(false, "Didn't catch exception checking for uninitialized Params");
-    }
-    catch (...) {
-        BOOST_CHECK_MESSAGE(true, "Caught exception checking for initalized Params");
-    }
-
-}
-
-BOOST_AUTO_TEST_CASE(deterministic_tests)
-{
-    SelectParams(CBaseChainParams::TESTNET);
-    cout << "Testing deterministic minting\n";
-    uint256 seedMaster("3a1947364362e2e7c073b386869c89c905c0cf462448ffd6c2021bd03ce689f6");
-
-    string strWalletFile = "unittestwallet.dat";
-
-    CWallet wallet("dummy", WalletDatabase::CreateDummy());
-    CzWallet zWallet(&wallet);
-    CKey keySeed;
-    keySeed.Set(seedMaster.begin(), true);
-    zWallet.SetMasterSeed(keySeed);
-    wallet.setZWallet(&zWallet);
-
-    int64_t nTimeStart = GetTimeMillis();
-    CoinDenomination denom = CoinDenomination::ZQ_ONE_HUNDRED;
-
-    std::vector<PrivateCoin> vCoins;
-    int nTests = 50;
-    for (int i = 0; i < nTests; i++) {
-        PrivateCoin coin(Params().Zerocoin_Params(), denom, false);
-        CDeterministicMint dMint;
-        zWallet.GenerateDeterministicZerocoin(denom, coin, dMint);
-        vCoins.emplace_back(coin);
-    }
-
-    int64_t nTotalTime = GetTimeMillis() - nTimeStart;
-    cout << "Total time:" << nTotalTime << "ms. Per Deterministic Mint:" << (nTotalTime/nTests) << "ms" << endl;
-
-    cout << "Checking that mints are valid" << endl;
-    CDataStream ss(SER_GETHASH, 0);
-    for (PrivateCoin& coin : vCoins) {
-        BOOST_CHECK_MESSAGE(coin.IsValid(), "Generated Mint is not valid");
-        ss << coin.getPublicCoin().getValue();
-    }
-
-    cout << "Checking that mints are deterministic: sha256 checksum=";
-    uint256 hash = Hash(ss.begin(), ss.end());
-    cout << hash.GetHex() << endl;
-    BOOST_CHECK_MESSAGE(hash == uint256("c90c225f2cbdee5ef053b1f9f70053dd83724c58126d0e1b8425b88091d1f73f"), "minting determinism isn't as expected");
-}
-
-    static inline void InsecureNewKey(CKey &key, bool fCompressed)
-    {
-        key.MakeNewKey(fCompressed);
-        assert(key.IsValid()); // Failure should be very rare
-    }
-    void makeNewStealthKey(CStealthAddress &sxAddr, CBasicKeyStore &keystore)
-    {
-        InsecureNewKey(sxAddr.scan_secret, true);
-
-        CKey spend_secret;
-        InsecureNewKey(spend_secret, true);
-        //sxAddr.spend_secret_id = spend_secret.GetPubKey().GetID();
-
-        SecretToPublicKey(sxAddr.scan_secret, sxAddr.scan_pubkey);
-        SecretToPublicKey(spend_secret, sxAddr.spend_pubkey);
-
-        // verify
-        CPubKey pkTemp = sxAddr.scan_secret.GetPubKey();
-        BOOST_CHECK(pkTemp.size() == EC_COMPRESSED_SIZE);
-        BOOST_CHECK(memcmp(&sxAddr.scan_pubkey[0], pkTemp.begin(), EC_COMPRESSED_SIZE) == 0);
-
-        pkTemp = spend_secret.GetPubKey();
-        BOOST_CHECK(pkTemp.size() == EC_COMPRESSED_SIZE);
-        BOOST_CHECK(pkTemp.size() == EC_COMPRESSED_SIZE);
-        BOOST_CHECK(memcmp(&sxAddr.spend_pubkey[0], pkTemp.begin(), EC_COMPRESSED_SIZE) == 0);
-
-        keystore.AddKeyPubKey(spend_secret, pkTemp);
-    }
-
-BOOST_AUTO_TEST_CASE(test_zerocoinspend_ringct_change)
-{
-    cout << "Testing zerocoin ringct change\n";
-    //initialize and Accumulator and AccumulatorWitness
-    PrivateCoin coin(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-    auto pubCoin = coin.getPublicCoin();
-    Accumulator accumulator(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
-    AccumulatorWitness witness(Params().Zerocoin_Params(), accumulator, pubCoin);
-
-
-    std::vector<libzerocoin::PublicCoin> vPubcoins;
-    for (unsigned int i = 0; i < 10; i++) {
-        PrivateCoin c(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-        vPubcoins.emplace_back(c.getPublicCoin());
-    }
-
-    //populate the witness and accumulators
-    accumulator += pubCoin;
-    for (const auto& pub : vPubcoins) {
-        BOOST_CHECK_MESSAGE(accumulator.accumulate(pub), "accumulator failed accumulating pubcoin");
-        witness += pub;
-    }
-
-    uint256 nChecksum = GetChecksum(accumulator.getValue());
-    uint256 ptxHash = CBigNum::randKBitBignum(256).getuint256();
-    bool fSpendValid = true;
-    CoinSpend* pspend;
-    try {
-        pspend = new CoinSpend(Params().Zerocoin_Params(), coin, accumulator, nChecksum, witness, ptxHash, SpendType::SPEND);
-    } catch (...) {
-        fSpendValid = false;
-    }
-    BOOST_CHECK_MESSAGE(fSpendValid, "Spend construction failed");
-
-    CDataStream ss(SER_NETWORK, 0);
-    ss << *pspend;
-
-    std::vector<unsigned char> data(ss.begin(), ss.end());
-
-    CTxIn newTxIn;
-    newTxIn.nSequence = 1;
-    newTxIn.scriptSig = CScript() << OP_ZEROCOINSPEND << data.size();
-    newTxIn.scriptSig.insert(newTxIn.scriptSig.end(), data.begin(), data.end());
-    newTxIn.prevout.SetNull();
-
-    CMutableTransaction tx;
-    tx.vin.emplace_back(newTxIn);
-    tx.vpout.resize(2);
-
-
-    CBasicKeyStore keystore;
-    ECC_Start_Stealth();
-
-    CStealthAddress sxAddr;
-    makeNewStealthKey(sxAddr, keystore);
-
-    CKey sEphem;
-    CKey secretShared;
-    ec_point pkSendTo;
-
-    // Send, secret = ephem_secret, pubkey = scan_pubkey
-    // NOTE: StealthSecret can fail if hash is out of range, retry with new ephemeral key
-    int k, nTries = 24;
-    for (k = 0; k < nTries; ++k)
-    {
-        InsecureNewKey(sEphem, true);
-        if (StealthSecret(sEphem, sxAddr.scan_pubkey, sxAddr.spend_pubkey, secretShared, pkSendTo) == 0)
-            break;
-    };
-
-    auto txbout = MAKE_OUTPUT<CTxOutRingCT>();
-    CTxOutRingCT *txout = (CTxOutRingCT*)txbout.get();
 //
-//    txout->pk = r.pkTo;
+//    //populate the witness and accumulators
+//    for(const auto& pubcoin : vPubcoins) {
+//        accumulator += pubcoin;
+//        witness += pubcoin;
+//    }
 //
-//    CPubKey pkEphem = r.sEphem.GetPubKey();
-//    SetCTOutVData(txout->vData, pkEphem, r.nStealthPrefix);
-
-}
-
-BOOST_AUTO_TEST_CASE(test_coinspendv4)
-{
-    cout << "Testing coinspendv4\n";
-
-    //initialize and Accumulator and AccumulatorWitness
-    PrivateCoin coin(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-    auto pubCoin = coin.getPublicCoin();
-    Accumulator accumulator(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
-    AccumulatorWitness witness(Params().Zerocoin_Params(), accumulator, pubCoin);
-
-    std::vector<libzerocoin::PublicCoin> vPubcoins;
-    for (unsigned int i = 0; i < 10; i++) {
-        PrivateCoin c(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
-        vPubcoins.emplace_back(c.getPublicCoin());
-    }
-
-    //populate the witness and accumulators
-    accumulator += pubCoin;
-    for (const auto& pub : vPubcoins) {
-        BOOST_CHECK_MESSAGE(accumulator.accumulate(pub), "accumulator failed accumulating pubcoin");
-        witness += pub;
-    }
-
-    uint256 ptxHash = uint256();
-    uint256 checksum = uint256();
-    CoinSpend spend(Params().Zerocoin_Params(), coin, accumulator, checksum, witness, ptxHash, SpendType::SPEND, CoinSpend::V4_LIMP);
-
-    std::string strError;
-    bool fValid = spend.Verify(accumulator, strError, true);
-    strError = std::string("Valid v4 coinspend failed to verify: ") + strError;
-    BOOST_CHECK_MESSAGE(fValid, strError);
-
-    //try serializing
-    CDataStream ss(0,0);
-    bool threw = false;
-    try {
-        ss << spend;
-    } catch (...) {
-        threw = true;
-    }
-
-    BOOST_CHECK_MESSAGE(!threw, "Serialization error with version 4 CoinSpend object");
-
-    threw = false;
-    try {
-        CoinSpend spendss(Params().Zerocoin_Params(), ss);
-        BOOST_CHECK_MESSAGE(spendss.getPubcoinValue() == coin.getPublicCoin().getValue(), "deserialized spend contains the wrong pubcoin");
-    } catch (...) {
-        threw = true;
-    }
-
-    BOOST_CHECK_MESSAGE(!threw, "Deserialization error with version 4 CoinSpend object");
-}
+//    //Get the checksum of the accumulator we use for the spend and also add it to our checksum map
+//    auto hashChecksum = GetChecksum(accumulator.getValue());
+//    CoinSpend* pspend = nullptr;
+//    try {
+//        pspend = new CoinSpend(Params().Zerocoin_Params(), coin, accumulator, hashChecksum, witness, uint256(), SpendType::SPEND);
+//    } catch (...) {
+//        BOOST_CHECK_MESSAGE(false, "Coinspend threw runtime error on creation");
+//    }
+//
+//    CDataStream serializedCoinSpend2(SER_NETWORK, PROTOCOL_VERSION);
+//    bool fSerialize = false;
+//    if (pspend) {
+//        cout << pspend->ToString() << endl;
+//        std::string strError;
+//        BOOST_CHECK_MESSAGE(pspend->Verify(accumulator, strError, true),
+//                            "Coinspend construction failed to create valid proof");
+//
+//        CBigNum serial = pspend->getCoinSerialNumber();
+//        BOOST_CHECK_MESSAGE(serial, "Serial Number can't be 0");
+//
+//        CoinDenomination denom = pspend->getDenomination();
+//        BOOST_CHECK_MESSAGE(denom == pubCoin.getDenomination(), "Spend denomination must match original pubCoin");
+//        BOOST_CHECK_MESSAGE(pspend->Verify(accumulator, strError, true), "CoinSpend object failed to validate");
+//
+//        //serialize the spend
+//        try {
+//            fSerialize = true;
+//            serializedCoinSpend2 << *pspend;
+//        } catch (...) {
+//            fSerialize = false;
+//        }
+//    }
+//    BOOST_CHECK_MESSAGE(fSerialize, "failed to serialize coinspend object");
+//
+//    std::vector<unsigned char> data(serializedCoinSpend2.begin(), serializedCoinSpend2.end());
+//
+//    /** Check valid spend */
+//
+//    CTxIn newTxIn;
+//    newTxIn.nSequence = 1;
+//    newTxIn.scriptSig = CScript() << OP_ZEROCOINSPEND << data.size();
+//    newTxIn.scriptSig.insert(newTxIn.scriptSig.end(), data.begin(), data.end());
+//    newTxIn.prevout.SetNull();
+//
+//    // Deserialize the CoinSpend intro a fresh object
+//    std::vector<char, zero_after_free_allocator<char> > dataTxIn;
+//    dataTxIn.insert(dataTxIn.end(), newTxIn.scriptSig.begin() + 4, newTxIn.scriptSig.end());
+//
+//    CDataStream serializedCoinSpend(dataTxIn, SER_NETWORK, PROTOCOL_VERSION);
+//    //old params for the V1 generated coin, new params for the accumulator. Emulates main-net transition.
+//    CoinSpend spend1(Params().Zerocoin_Params(), serializedCoinSpend);
+//    std::string strError;
+//    BOOST_CHECK_MESSAGE(spend1.Verify(accumulator, strError, true), "Failed deserialized check of CoinSpend");
+//
+//    CScript script;
+//    CTxOut txOut(1 * COIN, script);
+//
+//    CMutableTransaction txNew;
+//    txNew.vin.push_back(newTxIn);
+//    txNew.vpout.push_back(txOut.GetSharedPtr());
+//
+//    CTransaction txMintFrom;
+//    //BOOST_CHECK_MESSAGE(DecodeHexTx(txMintFrom, rawTx1), "Failed to deserialize hex transaction");
+//    if (!CheckZerocoinSpendNoDB(txNew, strError)) {
+//        BOOST_CHECK_MESSAGE(false, "checkzerocoinspend failed");
+//    }
+//
+//    /**check an overspend*/
+//
+//    CTxOut txOutOverSpend(100 * COIN, script);
+//    CMutableTransaction txOverSpend;
+//    txOverSpend.vin.push_back(newTxIn);
+//    txOverSpend.vpout.push_back(txOutOverSpend.GetSharedPtr());
+//    strError = "";
+//    CheckZerocoinSpendNoDB(txOverSpend, strError);
+//    string str = "Failed to detect overspend. Error Message: " + strError;
+//    BOOST_CHECK_MESSAGE(strError == "Transaction spend more than was redeemed in zerocoins", str);
+//
+//
+//    cout << "checking v2 spend\n";
+//
+//    CMutableTransaction tx;
+//    uint256 txHash;
+//    CTxIn in(txHash, 0);
+//    tx.vin.emplace_back(in);
+//
+//    // Create a New Zerocoin with specific denomination given by pubCoin
+//    PublicCoin pubcoin_v2 = coin.getPublicCoin();
+//
+//    //initialize and Accumulator and AccumulatorWitness
+//    Accumulator accumulator_v2(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
+//    AccumulatorWitness witness_v2(Params().Zerocoin_Params(), accumulator_v2, pubcoin_v2);
+//
+//    //populate the witness and accumulators - with old v1 params
+//    int64_t nTimeStart = GetTimeMillis();
+//    for(int i = 0; i < 5; i++) {
+//        PrivateCoin privTemp(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//        PublicCoin pubTemp = privTemp.getPublicCoin();
+//        accumulator_v2 += pubTemp;
+//        witness_v2 += pubTemp;
+//    }
+//    cout << (GetTimeMillis() - nTimeStart)/5 << "ms per mint\n";
+//
+//    accumulator_v2 += pubcoin_v2;
+//
+//    //Get the checksum of the accumulator we use for the spend and also add it to our checksum map
+////    auto hashChecksum_v2 = GetChecksum(accumulator_v2.getValue());
+////    uint256 ptxHash = CBigNum::randKBitBignum(256).getuint256();
+////    try {
+////        CoinSpend coinSpend_v2(Params().Zerocoin_Params(), coin, accumulator_v2, hashChecksum_v2, witness_v2,
+////                               ptxHash, SpendType::SPEND);
+////
+////        BOOST_CHECK_MESSAGE(coinSpend_v2.HasValidSerial(Params().Zerocoin_Params()),
+////                            "coinspend_v2 does not have a valid serial");
+////        std::cout << "398\n";
+////        BOOST_CHECK_MESSAGE(coinSpend_v2.Verify(accumulator_v2, strError, false), "coinspend_v2 failed to verify");
+////        std::cout << "400\n";
+////        BOOST_CHECK_MESSAGE(coinSpend_v2.HasValidSignature(), "coinspend_v2 does not have valid signature");
+////        //BOOST_CHECK_MESSAGE(coinSpend_v2.getVersion() == 2, "coinspend_v2 version is wrong");
+////        std::cout << "403\n";
+////        BOOST_CHECK_MESSAGE(coinSpend_v2.getPubKey() == coin.getPubKey(), "pub keys do not match");
+////        std::cout << "405\n";
+////    } catch (...) {
+////        BOOST_CHECK_MESSAGE(false, "Runtime error when creating coinspend_v2");
+////    }
+//}
+//
+//BOOST_AUTO_TEST_CASE(setup_exceptions_test)
+//{
+//    CBigNum bnTrustedModulus = 0;
+//    if (!bnTrustedModulus)
+//        bnTrustedModulus.SetDec(zerocoinModulus);
+//    libzerocoin::ZerocoinParams zerocoinParams = libzerocoin::ZerocoinParams(bnTrustedModulus);
+//
+//    cout << "Running check_unitialized parameters,etc for setup exceptions...\n";
+//
+//    CBigNum bnpubcoin;
+//    BOOST_CHECK(bnpubcoin.SetHexBool(rawTxpub1));
+//
+//    // Check Modulus > 1023 Exception
+//    try {
+//        ZerocoinParams ZCParams(bnpubcoin);
+//        BOOST_CHECK_MESSAGE(false, "Didn't catch exception:  ZerocoinException: Modulus must be at least 1023 bit");
+//    }
+//    catch (...) {
+//        BOOST_CHECK_MESSAGE(true, "Caught exception: ZerocoinException: Modulus must be at least 1023 bit");
+//    }
+//
+//    // Check Security Level < 80 Exception
+//    try {
+//        ZerocoinParams ZCParams(bnpubcoin,1);
+//        BOOST_CHECK_MESSAGE(false, "Didn't catch exception:  Security Level >= 80");
+//    }
+//    catch (...) {
+//        BOOST_CHECK_MESSAGE(true, "Caught exception: ZerocoinException: Security Level >= 80");
+//    }
+//
+//    // Check unitialized params Exception for PublicCoin
+//    try {
+//        zerocoinParams.initialized = false;
+//        PublicCoin pubCoin(&zerocoinParams);
+//        BOOST_CHECK_MESSAGE(false, "Didn't catch exception checking for uninitialized Params");
+//    }
+//    catch (...) {
+//        BOOST_CHECK_MESSAGE(true, "Caught exception checking for initalized Params");
+//    }
+//
+//    // Check unitialized params Exception for PublicCoin (alternate constructor)
+//    try {
+//        zerocoinParams.initialized = false;
+//        PublicCoin pubCoin(&zerocoinParams);
+//        BOOST_CHECK_MESSAGE(false, "Didn't catch exception checking for uninitialized Params");
+//    }
+//    catch (...) {
+//        BOOST_CHECK_MESSAGE(true, "Caught exception checking for initalized Params");
+//    }
+//
+//    // Check unitialized params Exception for PrivateCoin
+//    try {
+//        zerocoinParams.initialized = false;
+//        PrivateCoin privCoin(&zerocoinParams, CoinDenomination::ZQ_TEN);
+//        BOOST_CHECK_MESSAGE(false, "Didn't catch exception checking for uninitialized Params");
+//    }
+//    catch (...) {
+//        BOOST_CHECK_MESSAGE(true, "Caught exception checking for initalized Params");
+//    }
+//
+//}
+//
+//BOOST_AUTO_TEST_CASE(deterministic_tests)
+//{
+//    SelectParams(CBaseChainParams::TESTNET);
+//    cout << "Testing deterministic minting\n";
+//    uint256 seedMaster("3a1947364362e2e7c073b386869c89c905c0cf462448ffd6c2021bd03ce689f6");
+//
+//    string strWalletFile = "unittestwallet.dat";
+//
+//    CWallet wallet("dummy", WalletDatabase::CreateDummy());
+//    CzWallet zWallet(&wallet);
+//    CKey keySeed;
+//    keySeed.Set(seedMaster.begin(), true);
+//    zWallet.SetMasterSeed(keySeed);
+//    wallet.setZWallet(&zWallet);
+//
+//    int64_t nTimeStart = GetTimeMillis();
+//    CoinDenomination denom = CoinDenomination::ZQ_ONE_HUNDRED;
+//
+//    std::vector<PrivateCoin> vCoins;
+//    int nTests = 50;
+//    for (int i = 0; i < nTests; i++) {
+//        PrivateCoin coin(Params().Zerocoin_Params(), denom, false);
+//        CDeterministicMint dMint;
+//        zWallet.GenerateDeterministicZerocoin(denom, coin, dMint);
+//        vCoins.emplace_back(coin);
+//    }
+//
+//    int64_t nTotalTime = GetTimeMillis() - nTimeStart;
+//    cout << "Total time:" << nTotalTime << "ms. Per Deterministic Mint:" << (nTotalTime/nTests) << "ms" << endl;
+//
+//    cout << "Checking that mints are valid" << endl;
+//    CDataStream ss(SER_GETHASH, 0);
+//    for (PrivateCoin& coin : vCoins) {
+//        BOOST_CHECK_MESSAGE(coin.IsValid(), "Generated Mint is not valid");
+//        ss << coin.getPublicCoin().getValue();
+//    }
+//
+//    cout << "Checking that mints are deterministic: sha256 checksum=";
+//    uint256 hash = Hash(ss.begin(), ss.end());
+//    cout << hash.GetHex() << endl;
+//    BOOST_CHECK_MESSAGE(hash == uint256("c90c225f2cbdee5ef053b1f9f70053dd83724c58126d0e1b8425b88091d1f73f"), "minting determinism isn't as expected");
+//}
+//
+//    static inline void InsecureNewKey(CKey &key, bool fCompressed)
+//    {
+//        key.MakeNewKey(fCompressed);
+//        assert(key.IsValid()); // Failure should be very rare
+//    }
+//    void makeNewStealthKey(CStealthAddress &sxAddr, CBasicKeyStore &keystore)
+//    {
+//        InsecureNewKey(sxAddr.scan_secret, true);
+//
+//        CKey spend_secret;
+//        InsecureNewKey(spend_secret, true);
+//        //sxAddr.spend_secret_id = spend_secret.GetPubKey().GetID();
+//
+//        SecretToPublicKey(sxAddr.scan_secret, sxAddr.scan_pubkey);
+//        SecretToPublicKey(spend_secret, sxAddr.spend_pubkey);
+//
+//        // verify
+//        CPubKey pkTemp = sxAddr.scan_secret.GetPubKey();
+//        BOOST_CHECK(pkTemp.size() == EC_COMPRESSED_SIZE);
+//        BOOST_CHECK(memcmp(&sxAddr.scan_pubkey[0], pkTemp.begin(), EC_COMPRESSED_SIZE) == 0);
+//
+//        pkTemp = spend_secret.GetPubKey();
+//        BOOST_CHECK(pkTemp.size() == EC_COMPRESSED_SIZE);
+//        BOOST_CHECK(pkTemp.size() == EC_COMPRESSED_SIZE);
+//        BOOST_CHECK(memcmp(&sxAddr.spend_pubkey[0], pkTemp.begin(), EC_COMPRESSED_SIZE) == 0);
+//
+//        keystore.AddKeyPubKey(spend_secret, pkTemp);
+//    }
+//
+//BOOST_AUTO_TEST_CASE(test_zerocoinspend_ringct_change)
+//{
+//    cout << "Testing zerocoin ringct change\n";
+//    //initialize and Accumulator and AccumulatorWitness
+//    PrivateCoin coin(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//    auto pubCoin = coin.getPublicCoin();
+//    Accumulator accumulator(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
+//    AccumulatorWitness witness(Params().Zerocoin_Params(), accumulator, pubCoin);
+//
+//
+//    std::vector<libzerocoin::PublicCoin> vPubcoins;
+//    for (unsigned int i = 0; i < 10; i++) {
+//        PrivateCoin c(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//        vPubcoins.emplace_back(c.getPublicCoin());
+//    }
+//
+//    //populate the witness and accumulators
+//    accumulator += pubCoin;
+//    for (const auto& pub : vPubcoins) {
+//        BOOST_CHECK_MESSAGE(accumulator.accumulate(pub), "accumulator failed accumulating pubcoin");
+//        witness += pub;
+//    }
+//
+//    uint256 nChecksum = GetChecksum(accumulator.getValue());
+//    uint256 ptxHash = CBigNum::randKBitBignum(256).getuint256();
+//    bool fSpendValid = true;
+//    CoinSpend* pspend;
+//    try {
+//        pspend = new CoinSpend(Params().Zerocoin_Params(), coin, accumulator, nChecksum, witness, ptxHash, SpendType::SPEND);
+//    } catch (...) {
+//        fSpendValid = false;
+//    }
+//    BOOST_CHECK_MESSAGE(fSpendValid, "Spend construction failed");
+//
+//    CDataStream ss(SER_NETWORK, 0);
+//    ss << *pspend;
+//
+//    std::vector<unsigned char> data(ss.begin(), ss.end());
+//
+//    CTxIn newTxIn;
+//    newTxIn.nSequence = 1;
+//    newTxIn.scriptSig = CScript() << OP_ZEROCOINSPEND << data.size();
+//    newTxIn.scriptSig.insert(newTxIn.scriptSig.end(), data.begin(), data.end());
+//    newTxIn.prevout.SetNull();
+//
+//    CMutableTransaction tx;
+//    tx.vin.emplace_back(newTxIn);
+//    tx.vpout.resize(2);
+//
+//
+//    CBasicKeyStore keystore;
+//    ECC_Start_Stealth();
+//
+//    CStealthAddress sxAddr;
+//    makeNewStealthKey(sxAddr, keystore);
+//
+//    CKey sEphem;
+//    CKey secretShared;
+//    ec_point pkSendTo;
+//
+//    // Send, secret = ephem_secret, pubkey = scan_pubkey
+//    // NOTE: StealthSecret can fail if hash is out of range, retry with new ephemeral key
+//    int k, nTries = 24;
+//    for (k = 0; k < nTries; ++k)
+//    {
+//        InsecureNewKey(sEphem, true);
+//        if (StealthSecret(sEphem, sxAddr.scan_pubkey, sxAddr.spend_pubkey, secretShared, pkSendTo) == 0)
+//            break;
+//    };
+//
+//    auto txbout = MAKE_OUTPUT<CTxOutRingCT>();
+//    CTxOutRingCT *txout = (CTxOutRingCT*)txbout.get();
+////
+////    txout->pk = r.pkTo;
+////
+////    CPubKey pkEphem = r.sEphem.GetPubKey();
+////    SetCTOutVData(txout->vData, pkEphem, r.nStealthPrefix);
+//
+//}
+//
+//BOOST_AUTO_TEST_CASE(test_coinspendv4)
+//{
+//    cout << "Testing coinspendv4\n";
+//
+//    //initialize and Accumulator and AccumulatorWitness
+//    PrivateCoin coin(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//    auto pubCoin = coin.getPublicCoin();
+//    Accumulator accumulator(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN);
+//    AccumulatorWitness witness(Params().Zerocoin_Params(), accumulator, pubCoin);
+//
+//    std::vector<libzerocoin::PublicCoin> vPubcoins;
+//    for (unsigned int i = 0; i < 10; i++) {
+//        PrivateCoin c(Params().Zerocoin_Params(), CoinDenomination::ZQ_TEN, true);
+//        vPubcoins.emplace_back(c.getPublicCoin());
+//    }
+//
+//    //populate the witness and accumulators
+//    accumulator += pubCoin;
+//    for (const auto& pub : vPubcoins) {
+//        BOOST_CHECK_MESSAGE(accumulator.accumulate(pub), "accumulator failed accumulating pubcoin");
+//        witness += pub;
+//    }
+//
+//    uint256 ptxHash = uint256();
+//    uint256 checksum = uint256();
+//    CoinSpend spend(Params().Zerocoin_Params(), coin, accumulator, checksum, witness, ptxHash, SpendType::SPEND, CoinSpend::V4_LIMP);
+//
+//    std::string strError;
+//    bool fValid = spend.Verify(accumulator, strError, true);
+//    strError = std::string("Valid v4 coinspend failed to verify: ") + strError;
+//    BOOST_CHECK_MESSAGE(fValid, strError);
+//
+//    //try serializing
+//    CDataStream ss(0,0);
+//    bool threw = false;
+//    try {
+//        ss << spend;
+//    } catch (...) {
+//        threw = true;
+//    }
+//
+//    BOOST_CHECK_MESSAGE(!threw, "Serialization error with version 4 CoinSpend object");
+//
+//    threw = false;
+//    try {
+//        CoinSpend spendss(Params().Zerocoin_Params(), ss);
+//        BOOST_CHECK_MESSAGE(spendss.getPubcoinValue() == coin.getPublicCoin().getValue(), "deserialized spend contains the wrong pubcoin");
+//    } catch (...) {
+//        threw = true;
+//    }
+//
+//    BOOST_CHECK_MESSAGE(!threw, "Deserialization error with version 4 CoinSpend object");
+//}
 
 
 BOOST_AUTO_TEST_SUITE_END()

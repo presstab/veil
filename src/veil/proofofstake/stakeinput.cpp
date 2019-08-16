@@ -57,8 +57,9 @@ uint256 ZerocoinStake::GetChecksum()
 // 100 blocks deep.
 CBlockIndex* ZerocoinStake::GetIndexFrom()
 {
-    if (pindexFrom)
-        return pindexFrom;
+    //if the block changes and the stake set doesn't this may return incorrectly!!
+//    if (pindexFrom)
+//        return pindexFrom;
 
     int nHeightChecksum = 0;
 
@@ -67,7 +68,7 @@ CBlockIndex* ZerocoinStake::GetIndexFrom()
     else
         nHeightChecksum = GetChecksumHeightFromSpend();
 
-    if (nHeightChecksum > chainActive.Height()) {
+    if (!fMint && nHeightChecksum > chainActive.Height()) {
         pindexFrom = nullptr;
     } else {
         //note that this will be a nullptr if the height DNE
@@ -82,40 +83,48 @@ CAmount ZerocoinStake::GetValue()
     return denom * COIN;
 }
 
-int ZerocoinStake::HeightToModifierHeight(int nHeight)
+int ZerocoinStake::HeightToModifierHeight(int nHeightBlock, int nHeightStake)
 {
     //Nearest multiple of KernelModulus that is over KernelModulus bocks deep in the chain
-    int nRemainder = nHeight % Params().KernelModulus();
-    if (nHeight >= Params().HeightModulusV2()) {
+    int nRemainder = nHeightStake % Params().KernelModulus();
+    if (nHeightBlock >= Params().HeightModulusV2()) {
         //Add kernel modulus spacing to the height that is being staked (nHeight)
         //For example, a stake comes from block 299, the result would come back as 400. This is a block far enough
         //in the future to not be grindable.
-        return (nHeight + Params().KernelModulusSpacing() - nRemainder);
+        return (nHeightStake  + Params().KernelModulusSpacing() - nRemainder);
     }
 
-    return (nHeight - Params().KernelModulus()) - nRemainder ;
+    return (nHeightStake - Params().KernelModulus()) - nRemainder ;
 }
 
 //Use the first accumulator checkpoint that occurs 60 minutes after the block being staked from
-bool ZerocoinStake::GetModifier(uint64_t& nStakeModifier)
+bool ZerocoinStake::GetModifier(int nChainHeight, uint64_t& nStakeModifier)
 {
     CBlockIndex* pindex = GetIndexFrom();
     if (!pindex)
         return false;
 
-    int nNearest100Block = ZerocoinStake::HeightToModifierHeight(pindex->nHeight);
+    int nNearest100Block = ZerocoinStake::HeightToModifierHeight(nChainHeight, pindex->nHeight);
 
     //Rare case block index < 100, we don't use proof of stake for these blocks
     if (nNearest100Block < 1) {
         nStakeModifier = 1;
         return false;
     }
-
+    
+    bool fNewModulus = nChainHeight >= Params().HeightModulusV2();
     while (nNearest100Block != pindex->nHeight) {
-        pindex = pindex->pprev;
+        if (fNewModulus)
+            pindex = chainActive.Next(pindex); //todo: reorg concerns here? beyond reorg depth so should not be a worry. Double check...
+        else
+            pindex = pindex->pprev;
+
+        // Sanity
+        if (!pindex)
+            return false;
     }
 
-    if (nNearest100Block >= Params().HeightModulusV2()) {
+    if (nChainHeight >= Params().HeightModulusV2()) {
         //Use Veil data hash which has more uniqueness than an accumulator hash which may or may not be updated frequently
         nStakeModifier = UintToArith256(pindex->hashVeilData).GetLow64();
     } else {
