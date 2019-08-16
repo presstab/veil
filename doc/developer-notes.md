@@ -62,9 +62,35 @@ tool to clean up patches automatically before submission.
   - No extra spaces inside parenthesis; don't do ( this )
   - No space after function names; one space after `if`, `for` and `while`.
   - If an `if` only has a single-statement `then`-clause, it can appear
-    on the same line as the `if`, without braces. In every other case,
+    on the next line down from the `if`, without braces or on the same line if it consumes one or two words. In every other case,
     braces are required, and the `then` and `else` clauses must appear
     correctly indented on a new line.
+  - Prefer to handle the truthy case before the falsy case. (`if (true) {//truthy} else {//falsey}`
+  - When iterating, prefer to avoid additional scopes when it makes sense. For example using `continue` instead of `if/else` logic.
+
+      **Prefer:**
+      ```c++
+      for (const CTxIn& in : tx.vin) {
+        if (in.script.empty())
+            continue;
+
+        if (!in.script.validate()) {
+            nInvalidCount++;
+            LogPrintf("Found an invalid script!");
+        }
+      }
+      ```
+      **Instead of:**
+      ```c++
+      for (const CTxIn& in : tx.vin) {
+        if (!in.script.empty()) {
+            if (!in.script.validate()) {
+                nInvalidCount++;
+                LogPrintf("Found an invalid script!");
+            }
+        }
+      }
+      ```
 
 - **Symbol naming conventions**. These are preferred in new code, but are not
 required when doing so would need changes to significant pieces of existing
