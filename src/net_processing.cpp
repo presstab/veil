@@ -114,6 +114,13 @@ struct CBlockNetworkHeader {
     }
 };
 
+struct BlockRequest
+{
+    int32_t nTimeRequested;
+    int nHeight;
+};
+static std::map<uint256, BlockRequest> mapRequestedBlocks;
+
 // Internal stuff
 namespace {
     /** Number of nodes with fSyncStarted. */
@@ -3106,10 +3113,61 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         bool forceProcessing = false;
         bool fProcessBlock = false;
         bool fStageBlock = false;
+        bool fDiscardBlock = false;
         int nHeightBlock = 0;
         int nHeightNext = 0;
         const uint256 hash(pblock->GetHash());
+
+        //todo, instead of getting a lock on main here, see if this block was requested, find the height, and stage it if its not next
         {
+            LOCK(cs_staging);
+            nHeightNext = chainActive.Height() + 1;
+            auto pindexTip = chainActive.Tip();
+            if (pindexTip && mapRequestedBlocks.count(hash)) {
+                auto blockrequest = mapRequestedBlocks.at(hash);
+                if (blockrequest.nHeight - chainActive.Height() > 5) {
+                    //Check for blocks already in the chain
+                    if (blockrequest.nHeight >= nHeightNext -1) {
+                        if (blockrequest.nHeight == nHeightNext - 1) {
+                            //todo check a few blocks back on pindex tip to see if it is in the chain
+                            int nMaxReorgDepth = gArgs.GetArg("-maxreorg", DEFAULT_MAX_REORG_DEPTH);
+                            int nMaxDepth = pindexTip->nHeight - nMaxReorgDepth;
+                            if (blockrequest.nHeight < nMaxDepth) {
+                                fDiscardBlock = true;
+                                MarkBlockAsReceived(hash);
+                                LogPrint(BCLog::STAGING, "%s: Skip block that is outside of reorg depth (%d:%s) peer=%d\n", __func__,
+                                         blockrequest.nHeight, pblock->GetHash().GetHex(), pfrom->GetId());
+                            } else {
+                                if (pindexTip->GetBlockHash() == hash) {
+                                    //Check if it is the current tip
+                                    fDiscardBlock = true;
+                                } else {
+                                    //Check if it already exists further in the chain
+                                    auto pindexAncestor = pindexTip->GetAncestor(blockrequest.nHeight);
+                                    fDiscardBlock = pindexAncestor->GetBlockHash() == hash;
+                                }
+
+                                if (fDiscardBlock) {
+                                    MarkBlockAsReceived(hash);
+                                    LogPrint(BCLog::STAGING, "%s: Skip block that is already in main chain (%d:%s) peer=%d\n", __func__,
+                                             blockrequest.nHeight, pblock->GetHash().GetHex(), pfrom->GetId());
+                                }
+                            }
+                        }
+                    } else {
+                        //If the block is further away from the tip, we don't need to lock down cs_main for additional details,
+                        //just stage it for later
+                        fStageBlock = true;
+                        nHeightBlock = blockrequest.nHeight;
+                        MarkBlockAsReceived(hash);
+                    }
+                }
+            }
+
+            //Also check if we need to re-request the next block in the chain (sometimes it seems to get stuck)
+        }
+
+        if (!fStageBlock && !fDiscardBlock) {
             LOCK(cs_main);
             // Also always process if we requested the block explicitly, as we may
             // need it even though it is not a candidate for a new best tip.
@@ -3689,7 +3747,6 @@ public:
 };
 }
 
-static std::map<uint256, int32_t> mapRequestedBlocks;
 bool PeerLogicValidation::SendMessages(CNode* pto)
 {
     const Consensus::Params& consensusParams = Params().GetConsensus();
@@ -4206,7 +4263,7 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
                     //Next block, give about 5 seconds before asking for it again
                     auto mi = mapRequestedBlocks.find(inv.hash);
                     if (mi != mapRequestedBlocks.end()) {
-                        if (GetTime() - mi->second < 5)
+                        if (GetTime() - mi->second.nTimeRequested < 2) //todo need milliseconds here
                             fRequest = false;
                     }
                 } else if (pindex->nHeight > nBestHeight + 1) {
@@ -4217,11 +4274,14 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
                     auto mi = mapRequestedBlocks.find(inv.hash);
                     if (mi != mapRequestedBlocks.end()) {
-                        if (GetTime() - mi->second < 5)
+                        if (GetTime() - mi->second.nTimeRequested < 5)
                             fRequest = false;
                     } else if (mapBlockSource.count(inv.hash)) {
                         // Already have this block, so consider it requested
-                        mapRequestedBlocks.emplace(inv.hash, GetTime());
+                        BlockRequest req;
+                        req.nTimeRequested = GetTime();
+                        req.nHeight = pindex->nHeight;
+                        mapRequestedBlocks.emplace(inv.hash, req);
                         fRequest = false;
                     } else if (pindexBestHeader->GetAncestor(pindex->nHeight)) {
                         auto hashCheck = pindexBestHeader->GetAncestor(pindex->nHeight)->GetBlockHash();
@@ -4240,7 +4300,10 @@ bool PeerLogicValidation::SendMessages(CNode* pto)
 
                 if (fRequest) {
                     vGetData.push_back(inv);
-                    mapRequestedBlocks.emplace(inv.hash, GetTime());
+                    BlockRequest req;
+                    req.nTimeRequested = GetTime();
+                    req.nHeight = pindex->nHeight;
+                    mapRequestedBlocks.emplace(inv.hash, req);
                     MarkBlockAsInFlight(pto->GetId(), pindex->GetBlockHash(), pindex);
                     LogPrint(BCLog::NET, "Requesting block %s (%d) peer=%d\n", pindex->GetBlockHash().ToString(),
                              pindex->nHeight, pto->GetId());
