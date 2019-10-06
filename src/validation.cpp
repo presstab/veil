@@ -2649,7 +2649,8 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                     const std::vector<uint8_t> &vKeyImages = txin.scriptData.stack[0];
                     for (size_t k = 0; k < nAnonInputs; ++k) {
                         const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[k*33]);
-                        view.keyImages.emplace_back(std::make_pair(ki, txhash));
+                        view.AddKeyImage(ki, txhash, pindex->GetBlockHash());
+                        //view.keyImages.emplace_back(std::make_pair(ki, txhash));
                     }
 
 
@@ -2683,15 +2684,18 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                     control.Wait();
 
                     if (nTestExists > pindex->pprev->nAnonOutputs) {
-                        // The anon index can diverge from the chain index if shutdown does not complete
-                        LogPrintf("%s: Duplicate anon-output %s, index %d, above last index %d.\n", __func__, HexStr(txout->pk.begin(), txout->pk.end()), nTestExists, pindex->pprev->nAnonOutputs);
-                        LogPrintf("Attempting to repair anon index.\n");
-                        std::set<CCmpPubKey> setKi; // unused
-                        RollBackRCTIndex(pindex->pprev->nAnonOutputs, nTestExists, setKi);
-                        return false;
+                        // Check to see if this is in the chain...
+                        uint256 hashPk = Hash(txout->pk.begin(), txout->pk.end());
+                        uint256 hashBlockFrom;
+                        pblocktree->Read(std::make_pair('e', hashPk), hashBlockFrom);
+                        if (mapBlockIndex.count(hashBlockFrom)) {
+                            auto pindexFrom = mapBlockIndex.at(hashBlockFrom);
+                            if (chainActive.Contains(pindexFrom)) {
+                                //Chain has the block this is from, this is a duplicate
+                                return state.DoS(100, error("%s: Duplicate anon-output (db) %s, index %d.", __func__, HexStr(txout->pk.begin(), txout->pk.end()), nTestExists), REJECT_INVALID);
+                            }
+                        }
                     }
-
-                    return error("%s: Duplicate anon-output (db) %s, index %d.", __func__, HexStr(txout->pk.begin(), txout->pk.end()), nTestExists);
                 }
 
                 if (!fVerifyingDB && view.ReadRCTOutputLink(txout->pk, nTestExists)) {
@@ -2703,8 +2707,10 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                 view.nLastRCTOutput++;
                 CAnonOutput ao(txout->pk, txout->commitment, op, pindex->nHeight, 0);
 
-                view.anonOutputLinks[txout->pk] = view.nLastRCTOutput;
-                view.anonOutputs.emplace_back(std::make_pair(view.nLastRCTOutput, ao));
+                view.AddAnonLink(txout->pk, pindex->GetBlockHash());
+                view.AddAnonOutput(ao, pindex->GetBlockHash());
+                //view.anonOutputLinks[txout->pk] = view.nLastRCTOutput;
+                //view.anonOutputs.emplace_back(std::make_pair(view.nLastRCTOutput, ao));
             }
         }
         // With mismatched blind values it will throw off some other checks.
@@ -2995,6 +3001,7 @@ bool static FlushStateToDisk(const CChainParams& chainparams, CValidationState &
             // Flush the chainstate (which may refer to block index entries).
             if (!pcoinsTip->Flush())
                 return AbortNode(state, "Failed to write to coin database");
+
             nLastFlush = nNow;
             full_flush_completed = true;
         }
@@ -3066,6 +3073,10 @@ bool FlushView(CCoinsViewCache *view, CValidationState& state, bool fDisconnecti
 
         for (auto &it : view->anonOutputLinks)
             batch.Write(std::make_pair(DB_RCTOUTPUT_LINK, it.first), it.second);
+
+        //Database which block each of these items came from
+        for (const auto& pair : view->mapBlockAnonFrom)
+            batch.Write(std::make_pair('e', pair.first), pair.second);
 
         if (!pblocktree->WriteBatch(batch))
             return error("%s: Write RCT outputs failed.", __func__);

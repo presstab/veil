@@ -295,6 +295,8 @@ void Shutdown()
     // CValidationInterface callbacks, flush them...
     GetMainSignals().FlushBackgroundCallbacks();
 
+    pblocktree->WriteFlag("shutdown", true);
+
     // Any future callbacks will be dropped. This should absolutely be safe - if
     // missing a callback results in an unrecoverable situation, unclean shutdown
     // would too. The only reason to do the above flushes is to let the wallet catch
@@ -1733,6 +1735,135 @@ bool AppInitMain()
             }
         }
     }
+
+    // Check for improper shutdown, repair any unflushed cache state
+    bool fProperShutdown = false;
+    if (pblocktree->ReadFlag("shutdown", fProperShutdown) && !fProperShutdown) {
+        LOCK(cs_main);
+        LogPrintf("%s: Repairing RingCt state after forced shutdown\n", __func__);
+        auto pindexWalk = chainActive.Tip();
+        CBlockIndex* pindexLastFlushed = nullptr;
+
+        // Load the chain tip, and see if it has the rct state databased
+        int64_t nLastRCTOutput = 0;
+        bool fSwitchDirection = false;
+
+        //First iterate from the chain tip backwards. Find the last flushed block. Then iterate forwards and database
+        //all rct data that has not been
+        while (pindexWalk) {
+            LogPrintf("%s: Checking block %s\n", __func__, pindexWalk->GetBlockHash().GetHex());
+            CBlock block;
+            if (!ReadBlockFromDisk(block, pindexWalk, Params().GetConsensus()))
+                return error("%s: failed to read block %s from disk\n", __func__, pindexWalk->GetBlockHash().GetHex());
+
+            // Go through all of the block transactions and database the rct state items
+            std::vector<std::pair<CCmpPubKey, uint256> > vBlockKeyImages;
+            std::map<CCmpPubKey, int64_t> mapBlockAnonOutputLinks;
+            std::vector<std::pair<int64_t, CAnonOutput> > vBlockAnonOutputs;
+            for (const CTransactionRef ptx : block.vtx) {
+                uint256 txid = ptx->GetHash();
+                for (const CTxIn& txin : ptx->vin) {
+                    if (!txin.IsAnonInput())
+                        continue;
+
+                    uint32_t nAnonInputs, nRingSize;
+                    txin.GetAnonInfo(nAnonInputs, nRingSize);
+                    if (txin.scriptData.stack.size() != 1 || txin.scriptData.stack[0].size() != 33 * nAnonInputs)
+                        return error("%s: Bad scriptData stack, %s.", __func__, txid.GetHex());
+
+                    const std::vector<uint8_t> &vKeyImages = txin.scriptData.stack[0];
+                    for (size_t k = 0; k < nAnonInputs; ++k) {
+                        const CCmpPubKey &ki = *((CCmpPubKey *) &vKeyImages[k * 33]);
+
+                        uint256 txhash;
+                        if (pblocktree->ReadRCTKeyImage(ki, txhash)) {
+                            //Already have this block indexed, can go forward now
+                            LogPrintf("%s: found indexed block %s\n", __func__, pindexWalk->GetBlockHash().GetHex());
+                            nLastRCTOutput = pindexWalk->nAnonOutputs;
+                            pindexLastFlushed = pindexWalk;
+                            fSwitchDirection = true;
+                            break;
+                        }
+
+                        vBlockKeyImages.emplace_back(std::make_pair(ki, ptx->GetHash()));
+                    }
+
+                    if (fSwitchDirection)
+                        break;
+                }
+                if (fSwitchDirection)
+                    break;
+
+                for (unsigned int i = 0; i < ptx->vpout.size(); i++) {
+                    const CTxOutBaseRef out = ptx->vpout[i];
+                    if (out->GetType() != OUTPUT_RINGCT)
+                        continue;
+
+                    auto txout = (CTxOutRingCT*)out.get();
+                    nLastRCTOutput++;
+                    COutPoint outpoint(txid, i);
+                    CAnonOutput ao(txout->pk, txout->commitment, outpoint, pindexWalk->nHeight, 0);
+
+                    int64_t pki = 0;
+                    if (pblocktree->ReadRCTOutputLink(txout->pk, pki)) {
+                        //This block has already been flushed, switch to forward iteration
+                        LogPrintf("%s: found indexed block %s\n", __func__, pindexWalk->GetBlockHash().GetHex());
+                        pindexLastFlushed = pindexWalk;
+                        nLastRCTOutput = pindexWalk->nAnonOutputs;
+                        fSwitchDirection = true;
+                        break;
+                    }
+                    mapBlockAnonOutputLinks[txout->pk] = nLastRCTOutput;
+                    vBlockAnonOutputs.emplace_back(std::make_pair(nLastRCTOutput, ao));
+                }
+                if (fSwitchDirection)
+                    break;
+            }
+
+            if (fSwitchDirection) {
+                // Switch from iterating backwards and searching for the last flushed block, to iterating forwards
+                // and flushing information to disk
+                pindexWalk = chainActive.Next(pindexWalk);
+                fSwitchDirection = false;
+                continue;
+            } else if (pindexLastFlushed == nullptr) {
+                pindexWalk = pindexWalk->pprev;
+                continue;
+            }
+
+            //Flush the rct data to disk
+            CDBBatch batch(*pblocktree);
+            std::set<uint256> setHashes;
+            for (auto &it : vBlockKeyImages) {
+                batch.Write(std::make_pair(DB_RCTKEYIMAGE, it.first), it.second);
+                setHashes.emplace(Hash(it.first.begin(), it.first.end()));
+            }
+
+            for (auto &it : vBlockAnonOutputs) {
+                batch.Write(std::make_pair(DB_RCTOUTPUT, it.first), it.second);
+                setHashes.emplace(Hash(BEGIN(it.first), END(it.first)));
+            }
+
+            for (auto &it : mapBlockAnonOutputLinks) {
+                batch.Write(std::make_pair(DB_RCTOUTPUT_LINK, it.first), it.second);
+                setHashes.emplace(Hash(it.first.begin(), it.first.end()));
+            }
+
+            for (const uint256& hash : setHashes) {
+                batch.Write(std::make_pair('e', hash), pindexWalk->GetBlockHash());
+            }
+
+            if (!pblocktree->WriteBatch(batch))
+                return error("%s: Write RCT outputs failed.", __func__);
+
+            LogPrintf("%s: Flushed rct data from block %s to disk. nLastAnon = %d\n", __func__, pindexWalk->GetBlockHash().GetHex(), nLastRCTOutput);
+            pindexWalk = chainActive.Next(pindexWalk);
+        }
+    }
+
+    // Mark shutdown state as forcefull. If this is not overwritten to true before shutdown, it can be derived that
+    // there was a forced shutdown of the application.
+    pblocktree->WriteFlag("shutdown", false);
 
     // As LoadBlockIndex can take several minutes, it's possible the user
     // requested to kill the GUI during the last operation. If so, exit.

@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include <unordered_map>
+#include "utilstrencodings.h"
 
 /**
  * A UTXO entry.
@@ -241,9 +242,28 @@ public:
 
     mutable bool fForceDisconnect = false; // disconnect even if rct mismatch
     mutable int64_t nLastRCTOutput = 0;
+    mutable std::map<uint256, uint256> mapBlockAnonFrom; //hash of key (key in the kv pair of any of the 3 containers below), hash of block
     mutable std::vector<std::pair<int64_t, CAnonOutput> > anonOutputs;
     mutable std::map<CCmpPubKey, int64_t> anonOutputLinks;
     mutable std::vector<std::pair<CCmpPubKey, uint256> > keyImages;
+
+    void AddAnonLink(const CCmpPubKey& pk, const uint256& hashBlockFrom)
+    {
+        anonOutputLinks[pk] = nLastRCTOutput;
+        mapBlockAnonFrom[Hash(pk.begin(), pk.end())] = hashBlockFrom;
+    }
+
+    void AddAnonOutput(const CAnonOutput& ao, const uint256& hashBlockFrom)
+    {
+        anonOutputs.emplace_back(std::make_pair(nLastRCTOutput, ao));
+        mapBlockAnonFrom[Hash(BEGIN(ao), END(ao))] = hashBlockFrom;
+    }
+
+    void AddKeyImage(const CCmpPubKey ki, const uint256& txidFrom, const uint256& hashBlockFrom)
+    {
+        keyImages.emplace_back(std::make_pair(ki, txidFrom));
+        mapBlockAnonFrom[Hash(ki.begin(), ki.end())] = hashBlockFrom;
+    }
 
     bool ReadRCTOutputLink(CCmpPubKey &pk, int64_t &index)
     {
