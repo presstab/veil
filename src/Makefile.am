@@ -196,6 +196,7 @@ BITCOIN_CORE_H = \
   veil/proofofstake/kernel.h \
   veil/proofofstake/blockvalidation.h \
   veil/proofofstake/stakeinput.h \
+  veil/proofofstake/stakeweight.h \
   veil/ringct/anon.h \
   veil/ringct/blind.h \
   veil/ringct/extkey.h \
@@ -303,6 +304,7 @@ libbitcoin_server_a_SOURCES = \
   veil/proofofstake/blockvalidation.cpp \
   veil/proofofstake/kernel.cpp \
   veil/proofofstake/stakeinput.cpp \
+  veil/proofofstake/stakeweight.cpp \
   veil/budget.cpp \
   versionbits.cpp \
   $(BITCOIN_CORE_H)

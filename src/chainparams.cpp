@@ -619,6 +619,7 @@ public:
 
         /** RingCT/Stealth **/
         nDefaultRingSize = 11;
+        nMinimumStakeQuantity = 1 * COIN;
 
         nMaxHeaderRequestWithoutPoW = 50;
     }

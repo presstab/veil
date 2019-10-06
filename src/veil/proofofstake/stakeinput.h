@@ -44,7 +44,6 @@ public:
     virtual bool GetModifier(uint64_t& nStakeModifier, const CBlockIndex* pindexChainPrev) = 0;
     virtual bool IsZerocoins() = 0;
     virtual CDataStream GetUniqueness() = 0;
-    libzerocoin::CoinDenomination GetDenomination() {return denom;}
     StakeInputType GetType() const { return m_type; }
 };
 
@@ -132,7 +131,7 @@ public:
     CDataStream GetUniqueness() { return CDataStream(0,0); }
 
     //! PublicRingCt specific items
-    const std::vector<COutPoint>& GetTxInputs() const;
+    std::vector<COutPoint> GetTxInputs() const;
     CAmount GetMinimumInputValue() const { return m_nMinimumValue; }
 };
 

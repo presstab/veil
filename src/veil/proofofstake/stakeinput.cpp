@@ -366,6 +366,7 @@ bool RingCtStakeCandidate::CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 has
     CCoinControl coinControl;
     coinControl.Select(m_outpoint, m_nAmount);
     coinControl.nCoinType = OUTPUT_RINGCT;
+    coinControl.fProofOfStake = true;
 
     //Tell the rct code who the recipient is
     std::vector<CTempRecipient> vecSend;
@@ -408,7 +409,7 @@ PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout
     m_type = STAKE_RINGCT;
 }
 
-const std::vector<COutPoint>& PublicRingCtStake::GetTxInputs() const
+std::vector<COutPoint> PublicRingCtStake::GetTxInputs() const
 {
     return GetRingCtInputs(m_txin);
 }

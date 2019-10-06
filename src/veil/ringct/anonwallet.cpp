@@ -23,6 +23,7 @@
 #include <policy/rbf.h>
 #include <wallet/coincontrol.h>
 #include <veil/invalid.h>
+#include <veil/proofofstake/stakeweight.h>
 #include <veil/ringct/blind.h>
 #include <veil/ringct/anon.h>
 #include <veil/zerocoin/denomination_functions.h>
@@ -1530,7 +1531,7 @@ int CreateOutput(OUTPUT_PTR<CTxOutBase> &txbout, CTempRecipient &r, std::string 
     return 0;
 }
 
-int AnonWallet::AddCTData(CTxOutBase *txout, CTempRecipient &r, std::string &sError)
+int AnonWallet::AddCTData(CTxOutBase *txout, CTempRecipient &r, std::string &sError, bool fProofOfStake)
 {
     secp256k1_pedersen_commitment *pCommitment = txout->GetPCommitment();
     std::vector<uint8_t> *pvRangeproof = txout->GetPRangeproof();
@@ -1565,7 +1566,12 @@ int AnonWallet::AddCTData(CTxOutBase *txout, CTempRecipient &r, std::string &sEr
     size_t nRangeProofLen = 5134;
     pvRangeproof->resize(nRangeProofLen);
 
+    //If this is a proof-of-stake transaction, then the minimum value must be set above 0
     uint64_t min_value = 0;
+    if (fProofOfStake) {
+        min_value = GetStakeWeightBracket(nValue);
+    }
+
     int ct_exponent = 2;
     int ct_bits = 32;
 
@@ -3631,7 +3637,7 @@ int AnonWallet::AddAnonInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, std
         rtx.nFlags |= ORF_ANON_IN;
         AddOutputRecordMetaData(rtx, vecSend);
 
-        for (auto txin : txNew.vin)
+        for (const CTxIn& txin : txNew.vin)
             rtx.vin.emplace_back(txin.prevout);
         MarkInputsAsPendingSpend(rtx);
 
