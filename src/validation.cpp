@@ -6,9 +6,6 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <validation.h>
-
-#include <veil/zerocoin/accumulatormap.h>
-#include <veil/ringct/anon.h>
 #include <arith_uint256.h>
 #include <chain.h>
 #include <chainparams.h>
@@ -48,13 +45,18 @@
 #include <validationinterface.h>
 #include <warnings.h>
 
+#include <veil/budget.h>
+#include <veil/invalid.h>
 #include <veil/proofoffullnode/proofoffullnode.h>
 #include <veil/proofofstake/blockvalidation.h>
-#include <veil/budget.h>
-#include <veil/zerocoin/zchain.h>
 #include <veil/proofofstake/kernel.h>
+#include <veil/proofofstake/stakeinput.h>
+#include <veil/ringct/anon.h>
 #include <veil/ringct/blind.h>
-#include <veil/invalid.h>
+#include <veil/zerocoin/accumulators.h>
+#include <veil/zerocoin/accumulatormap.h>
+#include <veil/zerocoin/precompute.h>
+#include <veil/zerocoin/zchain.h>
 
 #ifdef ENABLE_WALLET
 #include <wallet/wallet.h>
@@ -65,8 +67,6 @@
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/thread.hpp>
-#include "veil/zerocoin/accumulators.h"
-#include "veil/zerocoin/precompute.h"
 
 #if defined(NDEBUG)
 # error "Veil cannot be compiled without assertions."
@@ -4741,10 +4741,10 @@ bool CChainState::ContextualCheckZerocoinStake(CBlockIndex* pindex, StakeInput* 
     }
 
     //Check that the Rct Spend has a rangeproof with a minimum value that is over the dust limit
-    if (stakeRct->GetMinimumInputValue() < Params().RingCt_StakeDustThreshold())
+    if (stakeRct->GetMinimumInputValue() < Params().MinimumStakeQuantity())
         return error("%s: Rct Stake does not use a sufficient minimum value. Uses:%d", __func__, stakeRct->GetMinimumInputValue());
 
-    //Check that minimum value lines up with RingCt tx's minimum value.
+    //todo: Check that minimum value lines up with RingCt tx's minimum value.
 
     return true;
 }

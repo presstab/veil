@@ -27,7 +27,6 @@
 #include <veil/zerocoin/ztracker.h>
 #include <veil/ringct/stealth.h>
 #include <veil/ringct/extkey.h>
-#include <veil/proofofstake/stakeinput.h>
 
 #include <algorithm>
 #include <atomic>
@@ -94,6 +93,7 @@ enum class FeeEstimateMode;
 class AnonWallet;
 class CTransactionRecord;
 class CoinWitnessCacheData;
+class StakeInput;
 
 /** (client) version numbers for particular wallet features */
 enum WalletFeature

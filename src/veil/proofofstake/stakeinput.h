@@ -25,17 +25,7 @@ enum StakeInputType
     STAKE_RINGCTCANDIDATE
 };
 
-std::string StakeInputTypeToString(StakeInputType t)
-{
-    if (t == STAKE_ZEROCOIN) {
-        return "ZerocoinStake";
-    } else if (t == STAKE_RINGCT) {
-        return "RingCtStake";
-    } else if (t == STAKE_RINGCTCANDIDATE) {
-        return "RingCtStakeCandidate";
-    }
-    return "error-type";
-}
+std::string StakeInputTypeToString(StakeInputType t);
 
 class StakeInput
 {
