@@ -25,6 +25,18 @@ enum StakeInputType
     STAKE_RINGCTCANDIDATE
 };
 
+std::string StakeInputTypeToString(StakeInputType t)
+{
+    if (t == STAKE_ZEROCOIN) {
+        return "ZerocoinStake";
+    } else if (t == STAKE_RINGCT) {
+        return "RingCtStake";
+    } else if (t == STAKE_RINGCTCANDIDATE) {
+        return "RingCtStakeCandidate";
+    }
+    return "error-type";
+}
+
 class StakeInput
 {
 protected:
@@ -105,7 +117,7 @@ public:
     bool GetTxFrom(CTransaction& tx) { return false; }
     CAmount GetValue() override { return m_nAmount; }
     bool CreateTxOuts(CWallet* pwallet, std::vector<CTxOut>& vout, CAmount nTotal) override { return false; }
-    bool GetModifier(uint64_t& nStakeModifier) override { return false; }
+    bool GetModifier(uint64_t& nStakeModifier, const CBlockIndex* pindexChainPrev) override { return false; }
     CDataStream GetUniqueness() override;
 };
 
@@ -126,8 +138,12 @@ public:
     bool GetTxFrom(CTransaction& tx) { return false; }
     CAmount GetValue() override { return m_nMinimumValue; }
     bool CreateTxOuts(CWallet* pwallet, std::vector<CTxOut>& vout, CAmount nTotal) override { return false; }
-    bool GetModifier(uint64_t& nStakeModifier) override { return false; }
+    bool GetModifier(uint64_t& nStakeModifier, const CBlockIndex* pindexChainFrom) override { return false; }
     CDataStream GetUniqueness() { return CDataStream(0,0); }
+
+    //! PublicRingCt specific items
+    const std::vector<COutPoint>& GetTxInputs() const;
+    CAmount GetMinimumInputValue() const { return m_nMinimumValue; }
 };
 
 #endif //PIVX_STAKEINPUT_H

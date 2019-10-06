@@ -4676,31 +4676,75 @@ static CDiskBlockPos SaveBlockToDisk(const CBlock& block, int nHeight, const CCh
 
 bool CChainState::ContextualCheckZerocoinStake(CBlockIndex* pindex, StakeInput* stake)
 {
-    if (ZerocoinStake* stakeCheck = dynamic_cast<ZerocoinStake*>(stake)) {
-        CBlockIndex* pindexFrom = stakeCheck->GetIndexFrom();
-        if (!pindexFrom)
-            return error("%s: failed to get index associated with zerocoin stake checksum", __func__);
+    if (stake->GetType() == StakeInputType::STAKE_ZEROCOIN) {
+        if (ZerocoinStake* stakeCheck = dynamic_cast<ZerocoinStake*>(stake)) {
+            CBlockIndex* pindexFrom = stakeCheck->GetIndexFrom();
+            if (!pindexFrom)
+                return error("%s: failed to get index associated with zerocoin stake checksum", __func__);
 
-        int nRequiredDepth = Params().Zerocoin_RequiredStakeDepth();
-        if (pindex->nHeight >= Params().HeightLightZerocoin())
-            nRequiredDepth = Params().Zerocoin_RequiredStakeDepthV2();
+            int nRequiredDepth = Params().Zerocoin_RequiredStakeDepth();
+            if (pindex->nHeight >= Params().HeightLightZerocoin())
+                nRequiredDepth = Params().Zerocoin_RequiredStakeDepthV2();
 
-        if (pindex->nHeight - pindexFrom->nHeight < nRequiredDepth)
-            return error("%s: zerocoin stake does not have required confirmation depth", __func__);
+            if (pindex->nHeight - pindexFrom->nHeight < nRequiredDepth)
+                return error("%s: zerocoin stake does not have required confirmation depth", __func__);
 
-        //The checksum needs to be the exact checksum from the modifier height
-        libzerocoin::CoinDenomination denom = libzerocoin::AmountToZerocoinDenomination(stakeCheck->GetValue());
-        int nHeightStake = pindex->nHeight - nRequiredDepth;
-        CBlockIndex* pindexFrom2 = pindex->GetAncestor(nHeightStake);
-        if (!pindexFrom2)
-            return error("%s: block ancestor does not exist", __func__);
+            // For zerocoin staking, the checksum needs to be the exact checksum from the modifier height
+            libzerocoin::CoinDenomination denom = libzerocoin::AmountToZerocoinDenomination(stakeCheck->GetValue());
+            int nHeightStake = pindex->nHeight - nRequiredDepth;
+            CBlockIndex* pindexFrom2 = pindex->GetAncestor(nHeightStake);
+            if (!pindexFrom2)
+                return error("%s: block ancestor does not exist", __func__);
 
-        uint256 hashCheckpoint = pindexFrom2->GetAccumulatorHash(denom);
-        if (hashCheckpoint != stakeCheck->GetChecksum())
-            return error("%s: accumulator checksum is different than the modifier block. indexfromheight=%d stake=%s blockfrom=%s", __func__, pindexFrom->nHeight, stakeCheck->GetChecksum().GetHex(), hashCheckpoint.GetHex());
-    } else {
-        return error("%s: dynamic_cast of stake ptr failed", __func__);
+            uint256 hashCheckpoint = pindexFrom2->GetAccumulatorHash(denom);
+            if (hashCheckpoint != stakeCheck->GetChecksum())
+                return error(
+                        "%s: accumulator checksum is different than the modifier block. indexfromheight=%d stake=%s blockfrom=%s",
+                        __func__, pindexFrom->nHeight, stakeCheck->GetChecksum().GetHex(), hashCheckpoint.GetHex());
+        } else {
+            return error("%s: dynamic_cast of zerocoin stake ptr failed", __func__);
+        }
+        return true;
     }
+
+    if (stake->GetType() != StakeInputType::STAKE_RINGCT) {
+        return error ("%s: Invalid stake type %s block height %d", __func__, StakeInputTypeToString(stake->GetType()), pindex->nHeight);
+    }
+
+    PublicRingCtStake* stakeRct = nullptr;
+    bool fCastFailed = false;
+    try {
+        stakeRct = dynamic_cast<PublicRingCtStake*>(stake);
+    } catch (std::bad_cast) {
+        fCastFailed = true;
+    }
+
+    if (fCastFailed || !stakeRct)
+        return error("%s: dynamic_cast of PublicRingCtStake failed", __func__);
+
+    // Check that all included inputs are beyond the minimum stake age
+    const std::vector<COutPoint>& vRctInputs = stakeRct->GetTxInputs();
+    for (const COutPoint& input : vRctInputs) {
+        CTransactionRef ptxPrev;
+        int nHeightTx = 0;
+        if (!IsTransactionInChain(input.hash, pindex->nHeight, ptxPrev, Params().GetConsensus(), pindex))
+            return error("%s: could not find tx %s within the same chain", __func__, input.hash.GetHex());
+        if (nHeightTx == 0 || nHeightTx > pindex->nHeight - Params().Zerocoin_RequiredStakeDepthV2())
+            return error("%s: included RingCt input is not below the required stake depth : %s", __func__, input.ToFullString());
+        if (ptxPrev->vpout.size() <= input.n)
+            return error("%s: RingCt Input %s does not exist", input.ToFullString());
+
+        //Check that it is a rct output
+        const CTxOutBaseRef txbout = ptxPrev->vpout[input.n];
+        if (txbout->GetType() != OUTPUT_RINGCT)
+            return error ("%s: RingCt Input %s is not a ringct output type", __func__, input.ToFullString());
+    }
+
+    //Check that the Rct Spend has a rangeproof with a minimum value that is over the dust limit
+    if (stakeRct->GetMinimumInputValue() < Params().RingCt_StakeDustThreshold())
+        return error("%s: Rct Stake does not use a sufficient minimum value. Uses:%d", __func__, stakeRct->GetMinimumInputValue());
+
+    //Check that minimum value lines up with RingCt tx's minimum value.
 
     return true;
 }

@@ -6,6 +6,7 @@
 #include <tinyformat.h>
 #include <secp256k1/include/secp256k1_mlsag.h>
 #include <wallet/coincontrol.h>
+#include <veil/ringct/anon.h>
 #include "veil/zerocoin/accumulators.h"
 #include "veil/zerocoin/mintmeta.h"
 #include "chain.h"
@@ -393,4 +394,9 @@ PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout
     m_nMinimumValue = nMinValue;
 
     m_type = STAKE_RINGCT;
+}
+
+const std::vector<COutPoint>& PublicRingCtStake::GetTxInputs() const
+{
+    return GetRingCtInputs(m_txin);
 }
