@@ -1723,7 +1723,8 @@ bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsVi
                     continue;
                 const COutPoint &prevout = tx.vin[i].prevout;
                 const Coin& coin = inputs.AccessCoin(prevout);
-                assert(!coin.IsSpent());
+                if (coin.IsSpent())
+                    return false;
 
                 // We very carefully only pass in things to CScriptCheck which
                 // are clearly committed to by tx' witness hash. This provides
