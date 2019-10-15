@@ -114,12 +114,12 @@ public:
 class PublicRingCtStake : public StakeInput
 {
 private:
-    const CTxIn& m_txin;
     uint256 m_hashPubKey;
+    CTransactionRef ptx;
     CAmount m_nMinimumValue;
 
 public:
-    explicit PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout);
+    explicit PublicRingCtStake(const CTransactionRef& txStake);
     bool IsZerocoins() override { return false; }
 
     CBlockIndex* GetIndexFrom() override { return nullptr; }
@@ -128,7 +128,7 @@ public:
     CAmount GetValue() override { return m_nMinimumValue; }
     bool CreateTxOuts(CWallet* pwallet, std::vector<CTxOut>& vout, CAmount nTotal) override { return false; }
     bool GetModifier(uint64_t& nStakeModifier, const CBlockIndex* pindexChainFrom) override { return false; }
-    CDataStream GetUniqueness() { return CDataStream(0,0); }
+    CDataStream GetUniqueness();
 
     //! PublicRingCt specific items
     std::vector<COutPoint> GetTxInputs() const;

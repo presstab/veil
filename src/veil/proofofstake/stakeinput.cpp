@@ -390,26 +390,31 @@ bool RingCtStakeCandidate::CreateTxIn(CWallet* pwallet, CTxIn& txIn, uint256 has
     return true;
 }
 
-PublicRingCtStake::PublicRingCtStake(const CTxIn& txin, const CTxOutRingCT* pout) : m_txin(txin)
+PublicRingCtStake::PublicRingCtStake(const CTransactionRef& txStake)
 {
     //Extract the pubkeyhash from the keyimage
+    const CTxIn& txin = txStake.vin[0];
     const std::vector<uint8_t> vKeyImages = txin.scriptData.stack[0];
     uint32_t nInputs, nRingSize;
     txin.GetAnonInfo(nInputs, nRingSize);
-    const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[0]); //todo: have check that there is only one keyimage in a stake tx, should occur before this constructor, or else move the loading of the key image to not be in constructor
+    const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[0]);
     m_hashPubKey = ki.GetHash();
-
+/*
     int nExp = 0;
     int nMantissa = 0;
     CAmount nMinValue = 0;
     CAmount nMaxValue = 0;
-    GetRangeProofInfo(pout->vRangeproof, nExp, nMantissa, nMinValue, nMaxValue);
-    m_nMinimumValue = nMinValue;
-
+    GetRangeProofInfo(txStake->vpout[0]->vRangeproof, nExp, nMantissa, nMinValue, nMaxValue);
+    m_nMinimumValue = nMinValue;*/
     m_type = STAKE_RINGCT;
 }
 
 std::vector<COutPoint> PublicRingCtStake::GetTxInputs() const
 {
     return GetRingCtInputs(m_txin);
+}
+
+CDataStream PublicRingCtStake::GetUniqueness()
+{
+
 }

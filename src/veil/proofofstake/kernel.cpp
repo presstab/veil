@@ -122,26 +122,35 @@ bool CheckProofOfStake(CBlockIndex* pindexCheck, const CTransactionRef txRef, co
     if (!txRef->IsCoinStake())
         return error("CheckProofOfStake() : called on non-coinstake %s", txRef->GetHash().ToString().c_str());
 
-    //Construct the stakeinput object
-    if (txRef->vin.size() != 1 && txRef->vin[0].IsZerocoinSpend())
-        return error("%s: Stake is not a zerocoinspend", __func__);
+    //A stake must either be a zerocoinspend or an anoninput
+    if (txRef->vin.size() != 1 || !(txRef->vin[0].IsZerocoinSpend() || txRef->vin[0].IsAnonInput()))
+        return error("%s: Stake is not a zerocoinspend or ringct spend", __func__);
 
+    CBlockIndex* pindexFrom;
     const CTxIn& txin = txRef->vin[0];
+    if (txRef->vin[0].IsZerocoinSpend()) {
+        //Zerocoin Stake
+        auto spend = TxInToZerocoinSpend(txin);
+        if (!spend)
+            return false;
+        stake = std::unique_ptr<StakeInput>(new ZerocoinStake(*spend.get()));
+        if (spend->getSpendType() != libzerocoin::SpendType::STAKE)
+            return error("%s: spend is using the wrong SpendType (%d)", __func__, (int) spend->getSpendType());
 
-    auto spend = TxInToZerocoinSpend(txin);
-    if (!spend)
-        return false;
-    stake = std::unique_ptr<StakeInput>(new ZerocoinStake(*spend.get()));
-    if (spend->getSpendType() != libzerocoin::SpendType::STAKE)
-        return error("%s: spend is using the wrong SpendType (%d)", __func__, (int)spend->getSpendType());
+        pindexFrom = stake->GetIndexFrom();
+    } else {
+        //RingCt Stake
+        auto txout = (CTxOutRingCT*)txRef->vpout[0].get();
+        stake = std::unique_ptr<StakeInput>(new PublicRingCtStake(txin, txout));
+        pindexFrom = pindexCheck->GetAncestor(pindexCheck->nHeight - Params().Zerocoin_RequiredStakeDepthV2());
+    }
 
-    CBlockIndex* pindex = stake->GetIndexFrom();
-    if (!pindex)
+    if (!pindexFrom)
         return error("%s: Failed to find the block index", __func__);
 
     // Read block header
     CBlock blockprev;
-    if (!ReadBlockFromDisk(blockprev, pindex->GetBlockPos(), Params().GetConsensus()))
+    if (!ReadBlockFromDisk(blockprev, pindexFrom->GetBlockPos(), Params().GetConsensus()))
         return error("CheckProofOfStake(): INFO: failed to find block");
 
     arith_uint256 bnTargetPerCoinDay;
